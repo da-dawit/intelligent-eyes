@@ -22,6 +22,7 @@ most. Nothing is trained except linear classifiers and a ridge regression; the e
 | Prop. 4.1 | adding one look: block inverse, innovation, `c_j` | `eyes/belief.py: add_one_look_terms` |
 | Prop. 5.1, eq. (2) | ridge prediction of a look, then Gaussian conditioning | `eyes/predictor.py: fit_ridge, condition_on_looks` |
 | Thm. 6.5, eq. (3) | `EIG ≈ ½(mᵀFm + v tr F)` | `eyes/eig.py: eig_closed_form` (and `eig_monte_carlo`) |
+| Sec. 8, metric 4 | greedy vs. the best of all pairs: Prop. 4.1 with a 2×2 block, eq. (3) for the pair | `eyes/pairs.py: all_pairs, pair_report` |
 | Cor. 7.1 | stopping rule: EIG → 0 as the belief sharpens | `eyes/controller.py: run(eps=...)`, `eyes/fit.py: choose_eps` |
 | Sec. 10 | ECE, McNemar, camera bootstrap, Spearman | `eyes/metrics.py` |
 
@@ -43,7 +44,7 @@ centre crop weight 0. Prop. 3.1's model ("every vote is a noisy copy of one L") 
 ```bash
 uv venv --python 3.11 .venv
 uv pip install --python .venv/bin/python -e ".[dev]"
-.venv/bin/python -m pytest          # 29 tests: derivations + controller on synthetic clips
+.venv/bin/python -m pytest          # 33 tests: derivations + controller on synthetic clips
 ```
 
 Data lives outside the repo, in `../data` by default (set `EYES_DATA` to move it).
@@ -89,15 +90,16 @@ Encoders: `clip` (CLIP B/16), `siglip2` (SigLIP 2 B/16), `dinov2` (DINOv2 B/14),
 | `eyes_mc_b2` | same, with Monte Carlo EIG | T + 2 |
 | `eyes_noR_b2` | eyes treating every observation as independent | T + 2 |
 | `eyes_stop` | eyes with up to 4 looks and the ε stopping rule | ≤ T + 4 |
+| `best_pair` | the pair that puts most belief on the true species (oracle reference) | T + 2 |
 | `all9` | every crop of every frame (reference) | 10T |
 
 ## Layout
 
 ```
-eyes/         the method (geometry, correlation, belief, predictor, eig, controller, fit, metrics)
+eyes/         the method (geometry, correlation, belief, predictor, eig, controller, pairs, fit, metrics)
               and the data side (data, views, encoders, classifier, cache, paths)
 scripts/      build_clips -> cache_features -> run_eval -> summarize; benchmark_encoder
-tests/        derivation checks and synthetic end-to-end checks
+tests/        derivation checks, pair formulas, synthetic end-to-end checks
 docs/         proposal and derivations
 ```
 

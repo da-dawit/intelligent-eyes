@@ -19,7 +19,7 @@ import pandas as pd
 from eyes import paths
 from eyes.metrics import camera_bootstrap, ece_from_confidence, mcnemar
 
-THRESH = dict(gain=0.02, beats_random=0.01, recovered=2 / 3, spearman=0.3, ece=0.05)
+THRESH = dict(gain=0.02, beats_random=0.01, recovered=2 / 3, near_optimal=3 / 4, spearman=0.3, ece=0.05)
 
 
 def per_clip(res: pd.DataFrame, method: str) -> pd.DataFrame:
@@ -34,6 +34,7 @@ def encoder_summary(enc_dir: Path):
     res = pd.concat([pd.read_csv(s / "clips.csv.gz").assign(seed=s.name) for s in seeds])
     ranking = pd.concat([pd.read_csv(s / "ranking.csv").assign(seed=s.name) for s in seeds])
     fits = [json.loads((s / "fit.json").read_text()) for s in seeds]
+    pairs = pd.concat([pd.read_csv(s / "pairs.csv.gz").assign(seed=s.name) for s in seeds])
     res["correct"] = res["correct"].astype(bool).astype(float)
 
     acc_seed = res.groupby(["seed", "method"])["correct"].mean().unstack(0)
@@ -57,7 +58,16 @@ def encoder_summary(enc_dir: Path):
         r = res[res["method"] == method]
         return ece_from_confidence(r["conf"].values, r["correct"].values)
 
+    # metric 4: information of the greedy pair / best pair (clips where some pair is informative)
+    pz = pairs[pairs["f_best"] > 1e-6]
+    near = dict(greedy=float((pz["f_greedy"] / pz["f_best"]).mean()),
+                greedy_pooled=float(pz["f_greedy"].sum() / pz["f_best"].sum()),
+                eyes=float((pz["f_eyes"] / pz["f_best"]).mean()),
+                below=float((pz["f_greedy"] < THRESH["near_optimal"] * pz["f_best"]).mean()),
+                exact=float(pz["best_is_greedy"].mean()))
+
     row = dict(
+        near=near, acc_best_pair=per_clip(res, "best_pair")["correct"].mean(),
         acc_glance=glance["correct"].mean(), acc_eyes=eyes["correct"].mean(), acc_random=rand["correct"].mean(),
         acc_all9=all9["correct"].mean(),
         gain=gain, vs_random=vs_rand, all9_gain=total, recovered=recovered, mcnemar_p_max=max(mcn),
@@ -92,10 +102,11 @@ def main():
             f"| 1. Gain over glance | {100 * g[0]:+.2f} pts [{100 * g[1]:+.2f}, {100 * g[2]:+.2f}], McNemar p<={row['mcnemar_p_max']:.3g} | >= +2 pts | {ok(g[0] >= THRESH['gain'])} |",
             f"| 2. Beats random | {100 * v[0]:+.2f} pts [{100 * v[1]:+.2f}, {100 * v[2]:+.2f}] | >= +1 pt | {ok(v[0] >= THRESH['beats_random'])} |",
             f"| 3. Gain recovered | {row['recovered']:.2f} (All-9 gains {100 * row['all9_gain']:+.2f} pts) | >= 2/3 | {ok(row['recovered'] >= THRESH['recovered'])} |",
+            f"| 4. Near-optimal | greedy/best {row['near']['greedy']:.3f} (pooled {row['near']['greedy_pooled']:.3f}); adaptive eyes {row['near']['eyes']:.3f}; greedy finds the best pair in {100 * row['near']['exact']:.0f}% of clips, falls below 3/4 in {100 * row['near']['below']:.1f}% | >= 3/4 | {ok(row['near']['greedy'] >= THRESH['near_optimal'])} |",
             f"| 5. Ranking (Spearman) | closed {row['spearman']:.2f}, MC {row['spearman_mc']:.2f}, closed~MC {row['spearman_closed_mc']:.2f} | >= 0.3 | {ok(row['spearman'] >= THRESH['spearman'])} |",
             f"| 6. Calibration (ECE) | eyes {row['ece_eyes']:.3f} vs no-R {row['ece_eyes_noR']:.3f}; glance {row['ece_glance']:.3f} vs {row['ece_glance_noR']:.3f}; All-9 {row['ece_all9']:.3f} vs {row['ece_all9_noR']:.3f} | <= 0.05 | {ok(row['ece_eyes'] <= THRESH['ece'])} |",
             "",
-            f"Accuracy: glance {100 * row['acc_glance']:.2f}, eyes(2) {100 * row['acc_eyes']:.2f}, random(2) {100 * row['acc_random']:.2f}, All-9 {100 * row['acc_all9']:.2f}\n",
+            f"Accuracy: glance {100 * row['acc_glance']:.2f}, eyes(2) {100 * row['acc_eyes']:.2f}, random(2) {100 * row['acc_random']:.2f}, best pair (oracle) {100 * row['acc_best_pair']:.2f}, All-9 {100 * row['acc_all9']:.2f}\n",
             "| method | passes/clip | accuracy per seed (%) |", "|---|---|---|",
         ]
         for m in acc_seed.index:
@@ -110,6 +121,9 @@ def main():
             ax.plot([passes[m] for m in ms], [100 * (acc_seed.loc[m].mean() - base) for m in ms], style,
                     label=f"{enc_dir.name} {'eyes' if prefix == 'eyes_b' else 'random'}")
         ax.plot(passes["all9"], 100 * (acc_seed.loc["all9"].mean() - base), "k*", ms=10)
+        ax.plot(passes["best_pair"], 100 * (acc_seed.loc["best_pair"].mean() - base), "kx", ms=8)
+    ax.plot([], [], "k*", ms=10, label="All-9 (10T passes)")
+    ax.plot([], [], "kx", ms=8, label="best pair (oracle, T+2)")
     ax.axhline(2, color="green", ls=":", label="metric 1 threshold")
     ax.set_xscale("log")
     ax.set_xticks([5, 7, 10, 20, 50])

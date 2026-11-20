@@ -7,7 +7,8 @@ Per seed (the seed sets the camera split, classifier training, MC samples, rando
      fitted on the 10 held out (temperatures, look predictor, sigma2, A, rho, lam, eps)
   2. turn every cached view into a vote  l = log q - log pi
   3. run each method on every test clip and record the outcome per clip
-Outputs results/<dataset>/<encoder>/seed<k>/{clips.csv.gz, ranking.csv, fit.json}.
+  4. score every pair of looks of every test clip: metric 4 and the best-pair reference
+Outputs results/<dataset>/<encoder>/seed<k>/{clips.csv.gz, ranking.csv, pairs.csv.gz, fit.json}.
 """
 import argparse
 import json
@@ -25,6 +26,7 @@ from eyes.correlation import class_conditional_residuals, fit_A, fit_rho, shrink
 from eyes.fit import choose_eps, choose_shrinkage
 from eyes.geometry import overlap_correlation
 from eyes.metrics import spearman
+from eyes.pairs import pair_report
 from eyes.predictor import fit_ridge, out_of_fold
 from eyes.views import motion_scores
 
@@ -160,17 +162,30 @@ def run_seed(frames, feats, seed, out_dir, args):
                 ("all9_noR", "all", 0, "I", 0.0, 1)]
     methods += [(f"random_b{b}", "random", b, "R", 0.0, RANDOM_DRAWS) for b in BUDGETS]
 
-    rows = []
+    rows, eyes_looks = [], {}
     for name, rule, budget, mkey, e, draws in methods:
         t1 = time.time()
         for d in range(draws):
             mrng = np.random.default_rng([seed, d, zlib.crc32(name.encode())])
             for c in clips:
                 o = run(c, models[mkey], rule=rule, budget=budget, eps=e, rng=mrng)
+                if name == "eyes_b2":
+                    eyes_looks[c.clip_id] = [f * 10 + k for f, k in o.looks]
                 rows.append((name, d, c.clip_id, c.camera, c.T, c.label, o.pred, o.pred == c.label,
                              float(o.p.max()), float(o.p[c.label]), o.passes,
                              ";".join(f"{f}-{k}" for f, k in o.looks), o.stopped))
         print(f"    {name:18s} {time.time() - t1:6.1f}s", flush=True)
+
+    # ---- metric 4 + best-pair reference: every pair of looks, from the glance state
+    t1, pr = time.time(), []
+    for c in clips:
+        r = pair_report(c, model, eyes_looks[c.clip_id])
+        pr.append(dict(clip_id=c.clip_id, T=c.T, **{k: v for k, v in r.items() if k != "oracle_looks"}))
+        rows.append(("best_pair", 0, c.clip_id, c.camera, c.T, c.label, r["oracle_pred"], r["oracle_pred"] == c.label,
+                     r["oracle_conf"], r["oracle_p_true"], c.T + 2,
+                     ";".join(f"{i // 10}-{i % 10}" for i in r["oracle_looks"]), False))
+    pairs = pd.DataFrame(pr)
+    print(f"    {'pairs (metric 4)':18s} {time.time() - t1:6.1f}s", flush=True)
     res = pd.DataFrame(rows, columns=["method", "draw", "clip_id", "camera", "T", "label", "pred", "correct",
                                       "conf", "p_true", "passes", "looks", "stopped"])
 
@@ -187,6 +202,7 @@ def run_seed(frames, feats, seed, out_dir, args):
     out_dir.mkdir(parents=True, exist_ok=True)
     res.to_csv(out_dir / "clips.csv.gz", index=False)
     ranking.to_csv(out_dir / "ranking.csv", index=False)
+    pairs.to_csv(out_dir / "pairs.csv.gz", index=False)
     fit = dict(seed=seed, K=K, n_heldout_cameras=len(held_cams), n_heldout_clips=len(held_clips),
                n_test_clips=len(clips), n_test_clips_unseen_label=int(test_all.loc[test_all["label"] < 0, "clip_id"].nunique()),
                glance_probe_heldout_acc=acc_g, crop_probe_heldout_acc=acc_c,
