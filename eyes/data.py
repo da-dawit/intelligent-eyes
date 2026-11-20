@@ -84,10 +84,12 @@ def build_iwildcam(root: str | Path, splits=("train", "test"), max_frames: int =
 def build_ddr(root: str | Path, max_clips: dict | None = None, seed: int = 0) -> tuple[pd.DataFrame, dict]:
     """DDR grading set -> one-frame clips. Grade 5 (ungradable) is dropped.
 
-    Expects root/DDR_grading/{train,valid,test}.txt with lines '<file> <grade>' and the
-    images in root/DDR_grading/<split>/. 'valid' is not used (fitting uses 10% of train).
+    Expects root/<folder>/{train,valid,test}.txt with lines '<file> <grade>' and the
+    images in root/<folder>/<split>/, where <folder> is DR_grading (the Hugging Face copy)
+    or DDR_grading (the original archive). 'valid' is not used (fitting uses 10% of train).
     """
-    root = Path(root) / "DDR_grading"
+    folder = next(f for f in ("DR_grading", "DDR_grading") if (Path(root) / f).is_dir())
+    root = Path(root) / folder
     rows = []
     for split in ("train", "test"):
         lab = pd.read_csv(root / f"{split}.txt", sep=r"\s+", header=None, names=["file", "grade"])
@@ -95,11 +97,13 @@ def build_ddr(root: str | Path, max_clips: dict | None = None, seed: int = 0) ->
         if max_clips and max_clips.get(split):
             lab = lab.sample(n=min(max_clips[split], len(lab)), random_state=seed)
         for f, g in zip(lab["file"], lab["grade"]):
-            rows.append((f"DDR_grading/{split}/{f}", f"{split}-{f}", split, g))
+            rows.append((f"{folder}/{split}/{f}", f"{split}-{f}", split, g))
     df = pd.DataFrame(rows, columns=["path", "clip_id", "split", "y"])
     frames = pd.DataFrame({
         "row": np.arange(len(df)), "path": df["path"], "clip_id": df["clip_id"], "split": df["split"],
         "camera": np.arange(len(df)),          # no cameras: each photo is its own bootstrap unit
         "frame_idx": 0, "y_frame": df["y"], "y_clip": df["y"],
     })
-    return frames, dict(frames=len(frames), by_split=frames.groupby("split").size().to_dict())
+    grades = frames.groupby(["split", "y_clip"]).size().unstack(0).fillna(0).astype(int)
+    return frames, dict(frames=len(frames), by_split=frames.groupby("split").size().to_dict(),
+                        grades={str(k): v for k, v in grades.to_dict().items()})

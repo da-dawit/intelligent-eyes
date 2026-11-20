@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 
 from eyes import paths
-from eyes.metrics import camera_bootstrap, ece_from_confidence, mcnemar
+from eyes.metrics import camera_bootstrap, ece_from_confidence, macro_f1, mcnemar, quadratic_kappa
 
 THRESH = dict(gain=0.02, beats_random=0.01, recovered=2 / 3, near_optimal=3 / 4, spearman=0.3, ece=0.05)
 
@@ -29,7 +29,25 @@ def per_clip(res: pd.DataFrame, method: str) -> pd.DataFrame:
                                     passes=("passes", "mean"), camera=("camera", "first"), T=("T", "first"))
 
 
-def encoder_summary(enc_dir: Path):
+OFFICIAL = ("glance", "hires", "random_b2", "motion_b2", "attention_b2", "eyes_b2", "eyes_stop", "best_pair", "all9")
+
+
+def official_metrics(res: pd.DataFrame, ordinal: bool) -> dict:
+    """Macro-F1 (and quadratic kappa for graded labels) per method, mean over seeds and draws."""
+    out = {}
+    for m in OFFICIAL:
+        r = res[res["method"] == m]
+        if r.empty:
+            continue
+        groups = [g for _, g in r.groupby(["seed", "draw"])]
+        f1 = np.mean([macro_f1(g["pred"].values, g["label"].values) for g in groups])
+        kap = np.mean([quadratic_kappa(g["pred"].values, g["label"].values, int(res["label"].max()) + 1)
+                       for g in groups]) if ordinal else float("nan")
+        out[m] = (f1, kap)
+    return out
+
+
+def encoder_summary(enc_dir: Path, ordinal: bool = False):
     seeds = sorted(enc_dir.glob("seed*"))
     res = pd.concat([pd.read_csv(s / "clips.csv.gz").assign(seed=s.name) for s in seeds])
     ranking = pd.concat([pd.read_csv(s / "ranking.csv").assign(seed=s.name) for s in seeds])
@@ -74,7 +92,7 @@ def encoder_summary(enc_dir: Path):
                 exact=float(pz["best_is_greedy"].mean()))
 
     row = dict(
-        vs_base=vs_base, near=near, acc_best_pair=per_clip(res, "best_pair")["correct"].mean(),
+        official=official_metrics(res, ordinal), vs_base=vs_base, near=near, acc_best_pair=per_clip(res, "best_pair")["correct"].mean(),
         acc_glance=glance["correct"].mean(), acc_eyes=eyes["correct"].mean(), acc_random=rand["correct"].mean(),
         acc_all9=all9["correct"].mean(),
         gain=gain, vs_random=vs_rand, all9_gain=total, recovered=recovered, mcnemar_p_max=max(mcn),
@@ -100,7 +118,7 @@ def main():
     lines = [f"# Results: {args.dataset}\n"]
     fig, ax = plt.subplots(figsize=(6.5, 4))
     for enc_dir in sorted(p for p in root.iterdir() if p.is_dir()):
-        row, acc_seed, passes, by_T = encoder_summary(enc_dir)
+        row, acc_seed, passes, by_T = encoder_summary(enc_dir, ordinal=args.dataset == "ddr")
         g, v = row["gain"], row["vs_random"]
         ok = lambda b: "PASS" if b else "fail"
         lines += [
@@ -120,8 +138,14 @@ def main():
             "",
             "| method | passes/clip | accuracy per seed (%) |", "|---|---|---|",
         ]
+        off_rows = ["", "Official metrics (mean over seeds):", "",
+                    "| method | macro-F1 |" + (" quadratic kappa |" if args.dataset == "ddr" else ""),
+                    "|---|---|" + ("---|" if args.dataset == "ddr" else "")]
+        off_rows += [f"| {m} | {f1:.3f} |" + (f" {k:.3f} |" if args.dataset == "ddr" else "")
+                     for m, (f1, k) in row["official"].items()]
         for m in acc_seed.index:
             lines.append(f"| {m} | {passes[m]:.2f} | " + ", ".join(f"{100 * a:.2f}" for a in acc_seed.loc[m]) + " |")
+        lines += off_rows
         lines += ["", "Gain of eyes(2) over glance by clip length:", "", "| frames T | gain (pts) | clips |", "|---|---|---|"]
         lines += [f"| {t} | {100 * r['mean']:+.2f} | {int(r['size'])} |" for t, r in by_T.iterrows()]
         lines.append("")
