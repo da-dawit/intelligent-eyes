@@ -16,3 +16,9 @@ body { font-family: 'Noto Sans', 'Helvetica Neue', Arial, sans-serif; }
 .results-table td { text-align: right; }
 .results-table th:first-child, .results-table td:first-child { text-align: left; }
 pre { white-space: pre; overflow-x: auto; }
+.method h4 { font-size: 1.1rem; margin: 1.6rem 0 0.4rem; }
+.method ul { margin-top: 0.25rem; }
+.method li { margin-bottom: 0.3rem; }
+.katex { font-size: 1.08em; }
+.katex-display { margin: 0.7rem 0 0.9rem; padding: 0.2rem 0; overflow-x: auto; overflow-y: hidden; }
+@media (max-width: 600px) { .katex-display { font-size: 0.72em; } }

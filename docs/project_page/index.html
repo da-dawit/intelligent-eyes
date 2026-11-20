@@ -8,7 +8,10 @@
   <link href="https://fonts.googleapis.com/css?family=Google+Sans|Noto+Sans|Castoro" rel="stylesheet">
   <link rel="stylesheet" href="static/css/bulma.min.css">
   <link rel="stylesheet" href="static/css/index.css">
+  <link rel="stylesheet" href="static/katex/katex.min.css">
   <script defer src="static/js/fontawesome.all.min.js"></script>
+  <script defer src="static/katex/katex.min.js"></script>
+  <script defer src="static/katex/auto-render.min.js" onload="renderMathInElement(document.body, {delimiters: [{left: '\\[', right: '\\]', display: true}, {left: '\\(', right: '\\)', display: false}], throwOnError: false});"></script>
 </head>
 <body>
 
@@ -67,15 +70,15 @@
           <p>Frozen vision transformers such as CLIP and DINOv2 process each frame at 224&times;224 pixels, so a
           small animal in a camera-trap clip may cover only a few patches. Encoding every region at higher resolution
           recovers the detail but multiplies the cost. We encode each frame of a clip once (the glance), predict the
-          evidence that each of the 9<i>T</i> candidate 2&times; crops would add, and encode only the crops with the
+          evidence that each of the \(9T\) candidate 2&times; crops would add, and encode only the crops with the
           highest expected information gain (EIG), computed in closed form. All observations are combined by Bayes'
-          rule with a fitted correlation matrix <i>R</i>, which discounts repeated evidence across frames and
+          rule with a fitted correlation matrix \(R\), which discounts repeated evidence across frames and
           overlapping crops.</p>
           <p>In the method as first proposed, each additional crop reduced accuracy. Most crops contain only
           background, and a crop classifier trained on clip-level labels associated background with species. We
           therefore train the crop classifier with an <i>empty</i> class using detector boxes (training data only),
           exclude crops classified as empty from the fusion, add an error term shared by the crops of a clip to
-          <i>R</i>, and compute the EIG over an animal and a background outcome. On the WILDS iWildCam test cameras,
+          \(R\), and compute the EIG over an animal and a background outcome. On the WILDS iWildCam test cameras,
           two crops then improve accuracy by 4.5&ndash;9.6 points over the glance for four frozen encoders, 96% of the
           selected crops contain the animal, and with the stopping rule about one crop per clip matches encoding all
           crops of every frame.</p>
@@ -94,20 +97,91 @@
     the crop contains the animal, predicted from the glance's patch tokens; the selected crop is outlined. (c) The
     selected crop, encoded at 2&times;. (d) Posterior over species after the glance (grey) and after two looks (blue);
     the true species is in bold.</p>
-    <div class="content has-text-justified">
-      <p><b>1. Glance.</b> Each frame is encoded once at 224&nbsp;px, and a linear classifier gives its vote
-      &ell;(<i>y</i>) = log <i>q</i>(<i>y</i>&nbsp;|&nbsp;frame) &minus; log &pi;(<i>y</i>).
-      <b>2. Predict each crop.</b> From the glance's patch tokens inside a crop, linear classifiers estimate the
-      probability that the crop contains the animal and the vote it would produce. The expected information gain of
-      a crop is EIG = <i>P</i>(animal) &middot; &frac12;(Var<sub><i>p</i></sub>[<i>m</i>] + <i>v</i>&thinsp;tr&thinsp;<i>F</i>),
-      where the second factor is the closed-form EIG of the animal outcome; a background crop leaves the posterior unchanged.
-      <b>3. Look.</b> The crop with the highest EIG is encoded at 2&times;. Its vote is
-      log(<i>q</i>(<i>y</i>&nbsp;|&nbsp;<i>c</i>)/&pi;(<i>y</i>) + <i>q</i>(empty&nbsp;|&nbsp;<i>c</i>)), which is close to 0
-      for a background crop. <b>4. Update.</b> All votes are combined as
-      <i>p</i>(<i>y</i>) &prop; &pi;(<i>y</i>) exp(<b>w</b><sup>&#8868;</sup>&ell;(<i>y</i>)) with
-      <b>w</b> = <i>R</i><sup>&minus;1</sup><b>1</b> and
-      <i>R</i> = <i>T</i><sub>&rho;</sub> &otimes; <i>A</i><sub>&lambda;</sub> + &tau;&thinsp;<b>1</b><sub>c</sub><b>1</b><sub>c</sub><sup>&#8868;</sup>,
-      fitted on held-out training cameras. Steps 2&ndash;4 repeat until the budget is used or the largest EIG is below &epsilon;.</p>
+    <div class="content has-text-justified method">
+      <p>A clip has \(T\) frames and shows one species \(y\) out of \(K\). The model keeps a belief
+      \(p(y)\) over the species. It starts from \(\pi(y)\), the share of species \(y\) in the training data,
+      and is updated by Bayes' rule each time the encoder looks at something: a whole frame, or one crop of a frame.</p>
+
+      <h4>1. Glance at every frame</h4>
+      <p>Each frame is resized to 224&times;224 pixels and encoded once by the frozen encoder. A linear classifier
+      on the embedding gives a probability \(q(y \mid \text{frame})\) for each species. We turn it into a
+      <i>vote</i>:</p>
+      \[ \ell(y) \;=\; \log q(y \mid \text{frame}) \;-\; \log \pi(y). \]
+      <p>The vote is positive for a species the frame makes more likely than it was before, negative for one it
+      makes less likely, and zero for every species if the frame carries no information. For example, if a species
+      makes up 10% of the training data and the classifier gives it 40%, its vote is
+      \(\log(0.4/0.1) = \log 4 \approx 1.39\).</p>
+
+      <h4>2. Combine the votes</h4>
+      <p>If the observations were independent, Bayes' rule would simply add their votes:
+      \(p(y) \propto \pi(y)\exp\big(\sum_j \ell_j(y)\big)\). They are not independent. Consecutive frames are
+      nearly identical, and overlapping crops see the same pixels, so adding every vote counts the same evidence
+      several times and makes the model overconfident. Each vote therefore gets a weight \(w_j\):</p>
+      \[ p(y) \;\propto\; \pi(y)\,\exp\Big(\sum_j w_j\,\ell_j(y)\Big), \qquad w = R^{-1}\mathbf{1}. \]
+      <p>Here \(R\) is the correlation matrix of the observations' errors (\(R_{jk}=0\): unrelated,
+      \(R_{jk}=1\): the same), \(R^{-1}\) is its inverse, and \(\mathbf{1}\) is a vector of ones. With two
+      observations of correlation \(r\), both weights are \(1/(1+r)\): two independent frames (\(r=0\)) count
+      fully, and two copies of the same frame (\(r=1\)) count \(\tfrac12+\tfrac12=1\), i.e. once. The matrix has
+      three parts, all fitted on held-out training cameras:</p>
+      \[ R \;=\; T_\rho \otimes A_\lambda \;+\; \tau\,\mathbf{1}_c\mathbf{1}_c^{\top}. \]
+      <ul>
+        <li>\(T_\rho\) relates frames: frames \(f\) and \(f'\) have correlation \(\rho^{|f-f'|}\) (fitted
+        \(\rho \approx 0.8\)), so neighbours are similar and distant frames less so.</li>
+        <li>\(A_\lambda\) relates the glance and the nine crops <i>within</i> a frame, from how much they overlap,
+        shrunk towards independence: \(A_\lambda=(1-\lambda)A+\lambda I\). The shrinking is needed because the four
+        corner crops tile the frame, which makes the raw overlap matrix \(A\) singular.</li>
+        <li>The Kronecker product \(\otimes\) combines the two: the entry for (frame \(f\), crop \(k\)) and
+        (frame \(f'\), crop \(k'\)) is \(\rho^{|f-f'|}\,(A_\lambda)_{kk'}\).</li>
+        <li>\(\tau\,\mathbf{1}_c\mathbf{1}_c^{\top}\) adds an error shared by all crops of a clip (the same
+        lighting and background), where \(\mathbf{1}_c\) has a 1 for each crop and a 0 for each glance. It stops
+        many crops from outweighing the glances.</li>
+      </ul>
+
+      <h4>3. Decide where to look</h4>
+      <p>Each frame has nine candidate crops, windows of half the frame's width and height on a 3&times;3 grid, so a
+      clip has \(9T\) candidates. Encoding a crop costs one encoder pass, so we want to know which crop is worth it
+      <i>before</i> encoding it. From the glance's patch tokens that fall inside a crop, linear models predict:</p>
+      <ul>
+        <li>\(P(\text{animal})\), the probability that the crop contains the animal;</li>
+        <li>\(m(y)\), how much the crop's vote is expected to move the score \(\log p(y)\) of each species, and
+        \(v\), the variance of that prediction. Both are computed with \(R\), so a crop that repeats a crop
+        already looked at gets a small \(m\) and \(v\).</li>
+      </ul>
+      <p>The value of a crop is its <i>expected information gain</i>: how much the belief \(p\) is expected to
+      change, measured by the Kullback&ndash;Leibler divergence. To second order in the change it has a closed
+      form:</p>
+      \[ \mathrm{EIG} \;=\; P(\text{animal}) \cdot \frac{1}{2}\Big( \mathrm{Var}_p[m] \;+\; v\,\big(1-\textstyle\sum_y p(y)^2\big) \Big), \]
+      \[ \mathrm{Var}_p[m] \;=\; \sum_y p(y)\,m(y)^2 \;-\; \Big(\sum_y p(y)\,m(y)\Big)^2. \]
+      <p>Each factor has a plain meaning:</p>
+      <ul>
+        <li>\(P(\text{animal})\): a crop of background changes nothing (step 4), so it is only worth its chance of
+        showing the animal.</li>
+        <li>\(\mathrm{Var}_p[m]\) is the variance of the expected shifts across species, weighted by the current
+        belief. It is large when the crop should separate the likely species, and zero when it would move all of
+        them by the same amount, which normalising \(p\) cancels.</li>
+        <li>\(v\,(1-\sum_y p(y)^2)\) is the value of a surprise. It vanishes when the model is already certain
+        (one \(p(y)=1\) makes \(\sum_y p(y)^2 = 1\)).</li>
+      </ul>
+      <p>For example, with two species at \(p=(0.5, 0.5)\) and a crop expected to raise the first species' score
+      by 2 and leave the second unchanged, \(\mathrm{Var}_p[m] = (0.5\cdot 2^2 + 0.5\cdot 0^2) - (0.5\cdot 2)^2 = 1\)
+      and \(1-\sum_y p(y)^2 = 0.5\), so \(\mathrm{EIG} = P(\text{animal})\cdot\tfrac12(1 + 0.5\,v)\).</p>
+
+      <h4>4. Look</h4>
+      <p>The crop with the highest EIG is encoded. It is cut from the frame at 448&times;448, so at 224&times;224 it
+      shows its region at twice the glance's resolution. Its classifier has one extra class, <i>empty</i> (trained
+      with animal boxes from the training cameras), and its vote is</p>
+      \[ \ell(y) \;=\; \log\Big( \frac{q(y \mid c)}{\pi(y)} \;+\; q(\text{empty} \mid c) \Big), \]
+      <p>where \(c\) is the crop and \(\pi(y)\) the share of species \(y\) among training crops that show an
+      animal. If the crop shows only background, \(q(\text{empty}\mid c)\approx 1\) and \(q(y\mid c)\approx 0\),
+      so \(\ell(y)\approx\log 1 = 0\): no evidence for or against any species. If it shows the animal,
+      \(q(\text{empty}\mid c)\approx 0\) and the vote is the usual \(\log q(y\mid c)-\log\pi(y)\). A crop
+      with \(q(\text{empty}\mid c)\ge\tfrac12\) has still cost its pass but is left out of step 2.</p>
+
+      <h4>5. Repeat or stop</h4>
+      <p>The belief is updated with step 2, and steps 3&ndash;4 repeat until the budget of looks is spent or the
+      largest EIG falls below a threshold \(\varepsilon\), also fitted on held-out cameras. A clip with two looks
+      costs \(T+2\) encoder passes; encoding every crop of every frame costs \(10T\). Every formula above is
+      derived step by step, with numbers, in the <a href="../derivations_step_by_step.pdf">derivation notes</a>.</p>
     </div>
   </div>
 </section>
