@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 
 import matplotlib
+import matplotlib.ticker
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
@@ -111,6 +112,9 @@ def main():
         ax.plot(passes["all9"], 100 * (acc_seed.loc["all9"].mean() - base), "k*", ms=10)
     ax.axhline(2, color="green", ls=":", label="metric 1 threshold")
     ax.set_xscale("log")
+    ax.set_xticks([5, 7, 10, 20, 50])
+    ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+    ax.get_xaxis().set_minor_formatter(matplotlib.ticker.NullFormatter())
     ax.set_xlabel("encoder passes per clip")
     ax.set_ylabel("accuracy gain over glance (pts)")
     ax.legend(fontsize=7)
