@@ -31,6 +31,8 @@ class Clip:
     clip_id: str = ""
     camera: int = -1
     look_scores: dict = field(default_factory=dict)   # name -> (T, 9) scores for B3/B4
+    p_animal: np.ndarray | None = None  # (T, 9) P(crop shows the animal), from the glance (eig_mix)
+    mu_animal: np.ndarray | None = None # (T, 9, K) predicted vote if it does (eig_mix)
 
     @property
     def T(self) -> int:
@@ -77,12 +79,16 @@ def look_indices(T: int) -> list[int]:
     return [f * N_POS + k for f in range(T) for k in range(1, N_POS)]
 
 
-def candidate_terms(clip: Clip, model: Model, S: list[int], L: list[int], C: list[int]):
+def candidate_terms(clip: Clip, model: Model, S: list[int], L: list[int], C: list[int], parts: bool = False):
     """For candidates C given observations S (looks L in S), return
 
         s      (K,)    current scores, p = softmax(s)
         m, v   (C,K),(C,)  mean and variance of each candidate's score shift Delta
         shift  (C, K)  the *actual* shift each candidate would cause (for evaluation only)
+
+    parts=True also returns (c, implied, correction): c_j of Prop. 4.1, what S implies about
+    each candidate (a_j^T l_S), and how conditioning on the looks taken moved each
+    prediction (Prop. 5.1) -- what eig_mix needs to score its two branches.
     """
     R = model.R(clip.T)
     K = clip.votes.shape[-1]
@@ -98,7 +104,24 @@ def candidate_terms(clip: Clip, model: Model, S: list[int], L: list[int], C: lis
     m = c[:, None] * (mu_c - implied)                                      # Cor. 5.2
     v = c ** 2 * var_c
     shift = c[:, None] * (votes[C] - implied)                              # exact, given R
+    if parts:
+        return s, m, v, shift, (c, implied, mu_c - mu[C])
     return s, m, v, shift
+
+
+def eig_mixture(p: np.ndarray, c: np.ndarray, implied: np.ndarray, correction: np.ndarray, v: np.ndarray,
+                p_animal: np.ndarray, mu_animal: np.ndarray) -> np.ndarray:
+    """EIG of a look whose vote has two branches: the crop shows the animal (probability
+    p_animal, predicted vote mu_animal) or only background (vote 0, eyes/boxes.py).
+
+        EIG = p_animal EIG(m_A, v) + (1 - p_animal) EIG(m_B, v)
+        m_A = c (mu_animal + correction - implied),   m_B = c (correction - implied)
+
+    The split is exact for the expectation E[KL]; each branch uses the closed form of eq. (3).
+    """
+    m_a = c[:, None] * (mu_animal + correction - implied)
+    m_b = c[:, None] * (correction - implied)
+    return p_animal * eig_closed_form(p, m_a, v) + (1 - p_animal) * eig_closed_form(p, m_b, v)
 
 
 def run(clip: Clip, model: Model, rule: str = "eig", budget: int = 2, eps: float = 0.0,
@@ -106,6 +129,7 @@ def run(clip: Clip, model: Model, rule: str = "eig", budget: int = 2, eps: float
     """Glance at every frame, then take up to `budget` looks chosen by `rule`.
 
     rule: "eig"        closed-form EIG (eq. 3)              -- the eyes
+          "eig_mix"    EIG with an animal / background branch per look (needs clip.p_animal)
           "eig_mc"     Monte Carlo EIG with exact KL
           "random"     uniformly random looks               -- B2
           "score:NAME" highest clip.look_scores[NAME]       -- B3 attention, B4 motion
@@ -128,11 +152,16 @@ def run(clip: Clip, model: Model, rule: str = "eig", budget: int = 2, eps: float
         C = [i for i in look_indices(T) if i not in L]
         if not C:
             break
-        if rule in ("eig", "eig_mc") or (record_first and step == 0):
-            s, m, v, shift = candidate_terms(clip, model, S, L, C)
+        if rule in ("eig", "eig_mc", "eig_mix") or (record_first and step == 0):
+            s, m, v, shift, (c, implied, corr) = candidate_terms(clip, model, S, L, C, parts=True)
             p = softmax(s)
         if rule == "eig":
             value = eig_closed_form(p, m, v)
+        elif rule == "eig_mix":
+            fk = [(i // N_POS, i % N_POS - 1) for i in C]
+            pa = np.array([clip.p_animal[f, k] for f, k in fk])
+            mu_a = np.stack([clip.mu_animal[f, k] for f, k in fk])
+            value = eig_mixture(p, c, implied, corr, v, pa, mu_a)
         elif rule == "eig_mc":
             value, _ = eig_monte_carlo(s, m, v, n_mc, rng)
         elif rule == "random":
@@ -154,7 +183,7 @@ def run(clip: Clip, model: Model, rule: str = "eig", budget: int = 2, eps: float
             )
 
         best = int(np.argmax(value))
-        if rule in ("eig", "eig_mc"):
+        if rule in ("eig", "eig_mc", "eig_mix"):
             best_eig.append(float(value[best]))
             if value[best] < eps:
                 stopped = True

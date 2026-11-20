@@ -38,7 +38,8 @@ def choose_shrinkage(clips: list[Clip], A: np.ndarray, rho: float, log_prior: np
     return min(nll, key=nll.get), nll
 
 
-def choose_eps(clips: list[Clip], model: Model, budget: int, grid=None, tol: float = 0.005, seed: int = 0):
+def choose_eps(clips: list[Clip], model: Model, budget: int, grid=None, tol: float = 0.005, seed: int = 0,
+               rule: str = "eig"):
     """Largest eps whose held-out accuracy is within `tol` of never stopping early.
 
     Returns (eps, table) with table[eps] = (accuracy, mean passes).
@@ -48,7 +49,7 @@ def choose_eps(clips: list[Clip], model: Model, budget: int, grid=None, tol: flo
     table = {}
     for eps in grid:
         rng = np.random.default_rng(seed)
-        out = [run(c, model, "eig", budget=budget, eps=eps, rng=rng) for c in clips]
+        out = [run(c, model, rule, budget=budget, eps=eps, rng=rng) for c in clips]
         table[eps] = (float(np.mean([o.pred for o in out] == labels)), float(np.mean([o.passes for o in out])))
     base = table[grid[0]][0]
     ok = [e for e in grid if table[e][0] >= base - tol]

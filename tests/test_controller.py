@@ -74,3 +74,20 @@ def test_first_step_record(world):
     o = run(c, world["model"], "eig", record_first=True)
     assert o.first_step["closed"].shape == (9 * c.T,)
     assert o.first_step["realised_kl"].shape == (9 * c.T,)
+
+
+def test_mixture_eig_reduces_to_one_branch():
+    """eig_mix with P(animal) = 1 is the animal branch's eq. (3); with 0, the background branch's."""
+    from eyes.controller import eig_mixture
+    from eyes.eig import eig_closed_form
+    rng = np.random.default_rng(0)
+    C, K = 5, 6
+    p = rng.dirichlet(np.ones(K))
+    c, v = rng.random(C) + 0.2, rng.random(C)
+    implied, corr, mu_a = rng.normal(size=(3, C, K))
+    one = eig_mixture(p, c, implied, corr, v, np.ones(C), mu_a)
+    zero = eig_mixture(p, c, implied, corr, v, np.zeros(C), mu_a)
+    np.testing.assert_allclose(one, eig_closed_form(p, c[:, None] * (mu_a + corr - implied), v))
+    np.testing.assert_allclose(zero, eig_closed_form(p, c[:, None] * (corr - implied), v))
+    half = eig_mixture(p, c, implied, corr, v, np.full(C, 0.5), mu_a)
+    np.testing.assert_allclose(half, 0.5 * (one + zero))

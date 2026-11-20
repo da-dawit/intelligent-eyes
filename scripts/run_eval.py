@@ -124,10 +124,26 @@ def predictor_inputs(rows, feats, preview=None):
     return np.concatenate(parts, axis=2).reshape(N * 9, -1)
 
 
-def build_clips(df, votes, mu, thumbs, attn=None):
+def animal_branch(rows, feats, preview, shape):
+    """From the glance preview: P(crop shows the animal) (N, 9) and the vote it would give if
+    it does (N, 9, K), shaped like the real crop votes (eig_mix)."""
+    probe_u, log_pi_crop, where = preview
+    u = feats["ubar"][rows].astype(np.float32)
+    x = u if where is None else np.concatenate([u, where[rows]], axis=2)
+    N, K = len(rows), len(log_pi_crop)
+    lq = probe_u.log_probs(x.reshape(N * 9, -1)).reshape(N, 9, K + 1)
+    p_animal = np.clip(1.0 - np.exp(lq[..., K]), 1e-6, 1.0)
+    eps, gain = shape
+    log_pi = np.log((1 - eps) * np.exp(log_pi_crop) + eps / K)
+    mu_animal = gain * (lq[..., :K] - np.log(p_animal)[..., None] - log_pi)
+    return p_animal.astype(np.float64), mu_animal.astype(np.float64)
+
+
+def build_clips(df, votes, mu, thumbs, attn=None, branch=None):
     """Group consecutive frame rows of `df` (positional, aligned with the arrays) into Clips.
 
     look_scores: 'motion' (B4) from thumbnails; 'attention' (B3) when the cache has it.
+    branch: optional (p_animal, mu_animal) arrays for the eig_mix rule.
     """
     clips = []
     for cid, idx in df.groupby("clip_id", sort=False).indices.items():
@@ -137,7 +153,9 @@ def build_clips(df, votes, mu, thumbs, attn=None):
             scores["attention"] = attn[idx].astype(np.float64)
         clips.append(Clip(votes=votes[idx].astype(np.float64), mu=mu[idx].astype(np.float64),
                           label=int(df["label"].iloc[idx[0]]), clip_id=cid, camera=int(df["camera"].iloc[idx[0]]),
-                          look_scores=scores))
+                          look_scores=scores,
+                          p_animal=None if branch is None else branch[0][idx],
+                          mu_animal=None if branch is None else branch[1][idx]))
     return clips
 
 
@@ -233,13 +251,16 @@ def run_seed(frames, feats, hires, seed, out_dir, args, content=None):
     A_fit = fit_A(resid)
     rho, c_hat = fit_rho(resid, held_df["clip_id"].values, held_df["frame_idx"].values)
     held_df = held_df.reset_index(drop=True)
-    held_clips = build_clips(held_df, votes_h, mu_h, feats["thumb"][hr])
+    branch_h = animal_branch(hr, feats, preview, shape) if preview is not None else None
+    held_clips = build_clips(held_df, votes_h, mu_h, feats["thumb"][hr], branch=branch_h)
     lam, nll_table = choose_shrinkage(held_clips, A_fit, rho, log_prior, pred.sigma2, seed=seed)
     lam_ov, nll_ov = choose_shrinkage(held_clips, overlap_correlation(), rho, log_prior, pred.sigma2, seed=seed)
     model = Model(shrink(A_fit, lam), rho, log_prior, pred.sigma2)
     models = {"R": model, "I": Model.independent(log_prior, pred.sigma2),
               "overlap": Model(shrink(overlap_correlation(), lam_ov), rho, log_prior, pred.sigma2)}
     eps, eps_table = choose_eps(held_clips, model, budget=max(BUDGETS), seed=seed)
+    if preview is not None:
+        eps_mix, _ = choose_eps(held_clips, model, budget=max(BUDGETS), seed=seed, rule="eig_mix")
 
     # ---- B1: the whole frame at 2x resolution, its own probe / temperature / rho
     if hires is not None:
@@ -258,7 +279,9 @@ def run_seed(frames, feats, hires, seed, out_dir, args, content=None):
     mu_t = np.zeros_like(votes_t)
     mu_t[:, 1:] = pred.predict(predictor_inputs(tr, feats, preview)).reshape(len(tr), 9, K)
     test_df = test_df.reset_index(drop=True)
-    clips = build_clips(test_df, votes_t, mu_t, feats["thumb"][tr], feats["attn"][tr] if "attn" in feats else None)
+    branch_t = animal_branch(tr, feats, preview, shape) if preview is not None else None
+    clips = build_clips(test_df, votes_t, mu_t, feats["thumb"][tr], feats["attn"][tr] if "attn" in feats else None,
+                        branch=branch_t)
 
     methods = [("glance", "eig", 0, "R", 0.0, 1), ("glance_noR", "eig", 0, "I", 0.0, 1)]
     methods += [(f"eyes_b{b}", "eig", b, "R", 0.0, 1) for b in BUDGETS]
@@ -271,6 +294,9 @@ def run_seed(frames, feats, hires, seed, out_dir, args, content=None):
                 ("all9", "all", 0, "R", 0.0, 1),
                 ("all9_noR", "all", 0, "I", 0.0, 1)]
     methods += [(f"random_b{b}", "random", b, "R", 0.0, RANDOM_DRAWS) for b in BUDGETS]
+    if preview is not None:
+        methods += [(f"eyesmix_b{b}", "eig_mix", b, "R", 0.0, 1) for b in BUDGETS]
+        methods += [("eyesmix_stop", "eig_mix", max(BUDGETS), "R", eps_mix, 1)]
 
     rows, eyes_looks = [], {}
     for name, rule, budget, mkey, e, draws in methods:
