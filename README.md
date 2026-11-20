@@ -81,6 +81,17 @@ python scripts/run_eval.py --dataset iwildcam --encoder dinov2 --seeds 0 1 2
 python scripts/summarize.py --dataset iwildcam
 ```
 
+DDR (one-frame clips, grades 0-4) runs the same steps with `--dataset ddr`. The grading split
+(13,673 photos, the official train/valid/test lists) is fetched from a Hugging Face copy, pinned
+to one revision; its file counts match the paper:
+
+```bash
+python -c "from huggingface_hub import snapshot_download; snapshot_download('YBoWen/DDR-dataset', \
+    repo_type='dataset', revision='cc2af821dbde42c545fd854d8e675c3bb74ca265', \
+    allow_patterns=['DR_grading/*'], local_dir='$EYES_DATA/raw/ddr')"
+python scripts/build_clips.py --dataset ddr --root $EYES_DATA/raw/ddr --out $EYES_DATA/processed/ddr
+```
+
 Encoders: `clip` (CLIP B/16), `siglip2` (SigLIP 2 B/16), `dinov2` (DINOv2 B/14), `dinov3`
 (DINOv3 B/16 — gated on Hugging Face: accept the licence, then `hf auth login`).
 
