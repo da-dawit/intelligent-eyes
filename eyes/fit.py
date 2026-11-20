@@ -40,7 +40,7 @@ def choose_shrinkage(clips: list[Clip], A: np.ndarray, rho: float, log_prior: np
 
 
 def choose_R(clips: list[Clip], A: np.ndarray, rho: float, log_prior: np.ndarray, sigma2: float,
-             lambdas=(0.0, 0.2, 0.4, 0.6, 0.8), taus=(0.0, 0.05, 0.1, 0.2, 0.4, 0.8), seed: int = 0):
+             lambdas=(0.0, 0.2, 0.4, 0.6, 0.8), taus=(0.0, 0.1, 0.2, 0.4, 0.8, 1.6, 3.2), seed: int = 0):
     """Pick (lam, tau) of R = T_rho (x) A_lam + tau 1_c 1_c^T by held-out NLL.
 
     Returns (lam, tau, {"lam,tau": nll})."""

@@ -2,8 +2,10 @@
 
     python scripts/summarize.py --dataset iwildcam
 
-Reads results/<dataset>/<encoder>/seed*/ and writes results/<dataset>/summary.md and
+Reads results/<dataset>/<run>/seed*/ and writes results/<dataset>/summary.md and
 results/<dataset>/accuracy_vs_passes.png. Thresholds are the ones fixed in the proposal.
+"The eyes" are the two-branch EIG (eyesmix_*) when a run has it, else plain EIG (eyes_*).
+--only clip,dinov2-boxes-...  restricts the runs;  --out NAME  writes NAME.md / NAME.png.
 """
 import argparse
 import json
@@ -29,7 +31,8 @@ def per_clip(res: pd.DataFrame, method: str) -> pd.DataFrame:
                                     passes=("passes", "mean"), camera=("camera", "first"), T=("T", "first"))
 
 
-OFFICIAL = ("glance", "hires", "random_b2", "motion_b2", "attention_b2", "eyes_b2", "eyes_stop", "best_pair", "all9")
+OFFICIAL = ("glance", "hires", "random_b2", "motion_b2", "attention_b2", "eyes_b2", "eyes_stop",
+            "eyesmix_b2", "eyesmix_stop", "best_pair", "all9")
 
 
 def official_metrics(res: pd.DataFrame, ordinal: bool) -> dict:
@@ -57,7 +60,9 @@ def encoder_summary(enc_dir: Path, ordinal: bool = False):
 
     acc_seed = res.groupby(["seed", "method"])["correct"].mean().unstack(0)
     passes = res.groupby("method")["passes"].mean()
-    eyes, glance, rand, all9 = (per_clip(res, m) for m in ("eyes_b2", "glance", "random_b2", "all9"))
+    E = "eyesmix" if "eyesmix_b2" in set(res["method"]) else "eyes"
+    eyes, glance, rand, all9 = (per_clip(res, m) for m in (f"{E}_b2", "glance", "random_b2", "all9"))
+    stop = per_clip(res, f"{E}_stop")
 
     def boot(diff, cams):
         return camera_bootstrap(diff.values, cams.values)
@@ -75,7 +80,7 @@ def encoder_summary(enc_dir: Path, ordinal: bool = False):
     recovered = (eyes["correct"].mean() - glance["correct"].mean()) / total if total > 0 else float("nan")
     mcn = []
     for s in res["seed"].unique():
-        a = res[(res.seed == s) & (res.method == "eyes_b2")].set_index("clip_id")["correct"].astype(bool)
+        a = res[(res.seed == s) & (res.method == f"{E}_b2")].set_index("clip_id")["correct"].astype(bool)
         b = res[(res.seed == s) & (res.method == "glance")].set_index("clip_id")["correct"].astype(bool)
         mcn.append(mcnemar(a.values, b.loc[a.index].values)["p"])
 
@@ -99,7 +104,8 @@ def encoder_summary(enc_dir: Path, ordinal: bool = False):
         spearman=float(ranking["closed_vs_realised"].mean()),
         spearman_mc=float(ranking["mc_vs_realised"].mean()),
         spearman_closed_mc=float(ranking["closed_vs_mc"].mean()),
-        ece_eyes=ece_of("eyes_b2"), ece_eyes_noR=ece_of("eyes_noR_b2"),
+        ece_eyes=ece_of(f"{E}_b2"), ece_eyes_noR=ece_of("eyes_noR_b2"), eyes_rule=E,
+        acc_stop=stop["correct"].mean(), looks_stop=stop["passes"].mean() - glance["passes"].mean(),
         ece_glance=ece_of("glance"), ece_glance_noR=ece_of("glance_noR"),
         ece_all9=ece_of("all9"), ece_all9_noR=ece_of("all9_noR"),
         rho=np.mean([f["rho"] for f in fits]), lam=np.mean([f["shrink_lambda"] for f in fits]),
@@ -113,11 +119,17 @@ def encoder_summary(enc_dir: Path, ordinal: bool = False):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dataset", default="iwildcam")
+    ap.add_argument("--only", default="", help="comma-separated run folders to include (default: all)")
+    ap.add_argument("--out", default="summary")
     args = ap.parse_args()
     root = paths.RESULTS / args.dataset
     lines = [f"# Results: {args.dataset}\n"]
     fig, ax = plt.subplots(figsize=(6.5, 4))
-    for enc_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+    runs = [p for p in root.iterdir() if p.is_dir() and any(p.glob("seed*/clips.csv.gz"))]
+    if args.only:
+        keep = args.only.split(",")
+        runs = [root / r for r in keep if (root / r) in runs]
+    for enc_dir in runs if args.only else sorted(runs):
         row, acc_seed, passes, by_T = encoder_summary(enc_dir, ordinal=args.dataset == "ddr")
         g, v = row["gain"], row["vs_random"]
         ok = lambda b: "PASS" if b else "fail"
@@ -131,7 +143,9 @@ def main():
             f"| 5. Ranking (Spearman) | closed {row['spearman']:.2f}, MC {row['spearman_mc']:.2f}, closed~MC {row['spearman_closed_mc']:.2f} | >= 0.3 | {ok(row['spearman'] >= THRESH['spearman'])} |",
             f"| 6. Calibration (ECE) | eyes {row['ece_eyes']:.3f} vs no-R {row['ece_eyes_noR']:.3f}; glance {row['ece_glance']:.3f} vs {row['ece_glance_noR']:.3f}; All-9 {row['ece_all9']:.3f} vs {row['ece_all9_noR']:.3f} | <= 0.05 | {ok(row['ece_eyes'] <= THRESH['ece'])} |",
             "",
-            f"Accuracy: glance {100 * row['acc_glance']:.2f}, eyes(2) {100 * row['acc_eyes']:.2f}, random(2) {100 * row['acc_random']:.2f}, best pair (oracle) {100 * row['acc_best_pair']:.2f}, All-9 {100 * row['acc_all9']:.2f}\n",
+            f"Accuracy: glance {100 * row['acc_glance']:.2f}, eyes(2) {100 * row['acc_eyes']:.2f} ({row['eyes_rule']}), "
+            f"eyes with stopping {100 * row['acc_stop']:.2f} ({row['looks_stop']:.2f} looks/clip), random(2) {100 * row['acc_random']:.2f}, "
+            f"best pair (oracle) {100 * row['acc_best_pair']:.2f}, All-9 {100 * row['acc_all9']:.2f}\n",
             "| Eyes(2) vs. baseline | baseline accuracy | passes/clip | Eyes(2) minus baseline (pts) |", "|---|---|---|---|",
             *[f"| {k} | {100 * a:.2f} | {n:.1f} | {100 * d[0]:+.2f} [{100 * d[1]:+.2f}, {100 * d[2]:+.2f}] |"
               for k, (a, n, d) in row["vs_base"].items()],
@@ -151,10 +165,10 @@ def main():
         lines.append("")
 
         base = acc_seed.loc["glance"].mean()
-        for prefix, style in (("eyes_b", "-o"), ("random_b", "--s")):
+        for prefix, style in ((f"{row['eyes_rule']}_b", "-o"), ("random_b", "--s")):
             ms = ["glance"] + [f"{prefix}{b}" for b in (1, 2, 3, 4)]
             ax.plot([passes[m] for m in ms], [100 * (acc_seed.loc[m].mean() - base) for m in ms], style,
-                    label=f"{enc_dir.name} {'eyes' if prefix == 'eyes_b' else 'random'}")
+                    label=f"{enc_dir.name} {'random' if prefix == 'random_b' else 'eyes'}")
         ax.plot(passes["all9"], 100 * (acc_seed.loc["all9"].mean() - base), "k*", ms=10)
         ax.plot(passes["best_pair"], 100 * (acc_seed.loc["best_pair"].mean() - base), "kx", ms=8)
     ax.plot([], [], "k*", ms=10, label="All-9 (10T passes)")
@@ -168,8 +182,8 @@ def main():
     ax.set_ylabel("accuracy gain over glance (pts)")
     ax.legend(fontsize=7)
     fig.tight_layout()
-    fig.savefig(root / "accuracy_vs_passes.png", dpi=160)
-    (root / "summary.md").write_text("\n".join(lines))
+    fig.savefig(root / ("accuracy_vs_passes.png" if args.out == "summary" else f"{args.out}.png"), dpi=160)
+    (root / f"{args.out}.md").write_text("\n".join(lines))
     print("\n".join(lines))
 
 

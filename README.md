@@ -26,12 +26,32 @@ most. Nothing is trained except linear classifiers and a ridge regression; the e
 | Cor. 7.1 | stopping rule: EIG → 0 as the belief sharpens | `eyes/controller.py: run(eps=...)`, `eyes/fit.py: choose_eps` |
 | Sec. 10 | ECE, McNemar, camera bootstrap, Spearman | `eyes/metrics.py` |
 
+| new: crop votes | a crop may show only background: `ℓ(y) = log(q(y∣c)/π(y) + q(empty∣c))` | `eyes/boxes.py: mixture_votes, crop_labels` |
+| new: gated fusion | a look whose crop shows no animal stays out of eq. (1); `R` fitted on the rest | `eyes/controller.py: enters`; `eyes/correlation.py: fit_A(mask), fit_rho(mask)` |
+| new: shared crop error | `R = T_ρ ⊗ A_λ + τ 1_c 1_cᵀ`: crop evidence levels off near `1/τ` | `eyes/correlation.py: clip_correlation`; `eyes/fit.py: choose_R` |
+| new: two-branch EIG | `EIG = P(animal)·EIG(animal branch)` (the background branch adds nothing) | `eyes/controller.py: eig_mixture` |
+
 Each numbered result has a test in [tests/test_derivations.py](tests/test_derivations.py) that
-checks the code against it.
+checks the code against it; the new pieces are checked in [tests/test_boxes.py](tests/test_boxes.py),
+[tests/test_controller.py](tests/test_controller.py) and [tests/test_derivations.py](tests/test_derivations.py).
 
-## One change from the proposal, found before any real data
+## Results (iWildCam, WILDS OOD test cameras, 3,930 clips, 3 seeds)
 
-On synthetic clips with a *known* R ([eyes/synthetic.py](eyes/synthetic.py)), combining every
+Clip accuracy (%), 2 looks. *First run*: the method exactly as proposed. *Final*: with the changes below.
+
+| encoder | glance | eyes, first run | **eyes, final** | eyes + stopping (looks/clip) | motion (B4) | attention (B3) | high-res (B1, 4T) | All-9 (10T) |
+|---|---|---|---|---|---|---|---|---|
+| CLIP | 67.1 | 64.2 | **76.4** | 76.2 (1.6) | 75.8 | 70.8 | 65.9 | 75.1 |
+| DINOv2 | 81.6 | 79.5 | **86.1** | 86.3 (0.9) | 85.5 | 85.1 | 85.4 | 86.0 |
+| DINOv3 | 78.2 | 75.3 | **84.1** | 84.1 (1.1) | 83.0 | 84.7 | 82.2 | 84.2 |
+| SigLIP 2 | 69.3 | 64.8 | **78.9** | 78.9 (1.2) | 78.2 | — | 68.8 | 77.6 |
+
+With the final method all six success metrics of the proposal pass for CLIP, DINOv3 and SigLIP 2,
+and five for DINOv2 (ranking 0.28 against 0.3): see [results/iwildcam/summary_final.md](results/iwildcam/summary_final.md).
+
+## Changes from the proposal, and why
+
+**1. Shrinking the within-frame table (found on synthetic data).** On synthetic clips with a *known* R ([eyes/synthetic.py](eyes/synthetic.py)), combining every
 crop with eq. (1) made the model *worse* than ignoring correlation. The cause: the four corner
 crops tile the frame, so the geometric overlap table `A` is singular and `w = A⁻¹1` gives the
 centre crop weight 0. Prop. 3.1's model ("every vote is a noisy copy of one L") fits repeats in
@@ -39,12 +59,41 @@ centre crop weight 0. Prop. 3.1's model ("every vote is a noisy copy of one L") 
 `A_λ = (1-λ)A + λI`, with λ chosen by held-out log-likelihood ([eyes/correlation.py: shrink](eyes/correlation.py),
 [eyes/fit.py](eyes/fit.py)). Time (ρ) is not shrunk.
 
+**2. Crop labels from animal boxes (the first real failure mode).** As proposed, every crop was
+labelled with the clip's species. On real data every look *lowered* accuracy and All-9 lost 15–20
+points. [scripts/diagnose_crops.py](scripts/diagnose_crops.py) measured why with MegaDetector v4
+boxes (used for training labels and diagnosis only, never at test time): two thirds of crops show
+no animal, so the crop classifier learned "this scenery means this species" and was right on
+only 43% of the crops that *do* hold the animal. With an extra *empty* class — a crop gets the
+species if it holds the animal, *empty* if it touches none — the vote follows from Bayes' rule
+as `log(q(y∣c)/π(y) + q(empty∣c))` (derivation in [eyes/boxes.py](eyes/boxes.py)). Accuracy on
+animal crops rose to 86%.
+
+**3. Gated fusion.** Eq. (1) treats every vote as a noisy copy of the same evidence, so a
+background crop's vote of 0 read as evidence *against* the glance's answer, and EIG expected
+that spurious change. A look whose own crop classifier says *empty* (q ≥ ½) now costs its pass
+but stays out of eq. (1), and `R` is fitted only on observations that enter it.
+
+**4. A shared crop error in R.** With many looks, crop votes still over-counted: their errors are
+largely shared within a clip (the same light, the same background). `τ 1_c 1_cᵀ` adds that shared
+error; τ is fitted with λ by held-out log-likelihood (0.4–0.8: all the crops of a clip together
+count about as much as one more frame). Extra looks now never hurt.
+
+**5. Two-branch EIG.** A gated look either shows the animal or changes nothing, so
+`EIG = P(animal) · EIG(animal branch)`, exact as an expectation, with eq. (3) for the branch.
+`P(animal)` comes from a linear classifier on the glance's own tokens over the crop (AUC 0.97–0.98
+on test cameras, better than pixel motion at 0.82 or CLS attention at 0.61–0.94).
+
+**A bug found on the way.** In float16 the eager attention pass turned every DINOv3 attention map
+into NaN, which silently broke its B3 baseline; attention now runs in float32
+([eyes/encoders.py](eyes/encoders.py), repaired caches with [scripts/fix_attention.py](scripts/fix_attention.py)).
+
 ## Setup
 
 ```bash
 uv venv --python 3.11 .venv
 uv pip install --python .venv/bin/python -e ".[dev]"
-.venv/bin/python -m pytest          # 33 tests: derivations + controller on synthetic clips
+.venv/bin/python -m pytest          # 43 tests: derivations, new pieces, controller on synthetic clips
 ```
 
 Data lives outside the repo, in `../data` by default (set `EYES_DATA` to move it).
@@ -73,10 +122,15 @@ python scripts/cache_features.py --frames $EYES_DATA/processed/iwildcam/frames.c
     --images $EYES_DATA/raw/iwildcam_v2.0 --encoders dinov2 clip siglip2 dinov3 --hires \
     --out-root $EYES_DATA/features/iwildcam
 
-# 3. fit on 10% held-out training cameras, run every method on the test clips, 3 seeds
-python scripts/run_eval.py --dataset iwildcam --encoder dinov2 --seeds 0 1 2
+# 3. animal boxes for the crop labels (82 MB, read out of the 169 GB LILA archive by range requests)
+python scripts/fetch_boxes.py --out $EYES_DATA/raw/iwildcam_mdv4
 
-# 4. Table I of the proposal + accuracy-vs-passes figure
+# 4. fit on 10% held-out training cameras, run every method on the test clips, 3 seeds.
+#    The final method; drop the flags for the method exactly as proposed.
+python scripts/run_eval.py --dataset iwildcam --encoder dinov2 --seeds 0 1 2 \
+    --crop-labels boxes --predictor preview --vote-shape none --fusion gated --crop-effect fit
+
+# 5. Table I of the proposal + accuracy-vs-passes figure
 python scripts/summarize.py --dataset iwildcam
 ```
 
@@ -107,20 +161,24 @@ Encoders: `clip` (CLIP B/16), `siglip2` (SigLIP 2 B/16), `dinov2` (DINOv2 B/14),
 | `eyes_mc_b2` | same, with Monte Carlo EIG | T + 2 |
 | `eyes_noR_b2` | eyes treating every observation as independent | T + 2 |
 | `eyes_stop` | eyes with up to 4 looks and the ε stopping rule | ≤ T + 4 |
+| `eyesmix_b2` | + 2 looks chosen by the two-branch EIG (final method) | T + 2 |
+| `eyesmix_stop` | two-branch EIG, up to 4 looks, ε stopping rule (final method) | ≤ T + 4 |
 | `best_pair` | the pair that puts most belief on the true species (oracle reference) | T + 2 |
 | `all9` | every crop of every frame (reference) | 10T |
 
 ## Layout
 
 ```
-eyes/         the method (geometry, correlation, belief, predictor, eig, controller, pairs, fit, metrics)
+eyes/         the method (geometry, correlation, belief, predictor, eig, controller, pairs, boxes, fit, metrics)
               and the data side (data, views, encoders, classifier, cache, paths)
-scripts/      build_clips -> cache_features -> run_eval -> summarize; benchmark_encoder
+scripts/      build_clips -> cache_features -> fetch_boxes -> run_eval -> summarize;
+              diagnose_crops (failure-mode analysis), cloud_run.sh, benchmark_encoder, fix_attention
 tests/        derivation checks, pair formulas, synthetic end-to-end checks
 docs/         proposal and derivations
 ```
 
 ## Data and model licences
 
-iWildCam (WILDS v2.0, CDLA-Permissive), DDR (CC BY-NC-SA 4.0, non-commercial). Encoders are
+iWildCam (WILDS v2.0, CDLA-Permissive; MegaDetector v4 boxes from the iWildCam 2022 metadata on
+LILA, CDLA-Permissive), DDR (CC BY-NC-SA 4.0, non-commercial). Encoders are
 used frozen under their own licences (DINOv3 requires accepting Meta's licence).
