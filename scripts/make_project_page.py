@@ -1,65 +1,70 @@
-"""Build the project page from the results: docs/project_page/index.html (+ a few example frames).
+"""Build the project page: docs/project_page/index.html, its figures, and (with make_videos.py) its videos.
 
-    python scripts/make_project_page.py
+    python scripts/make_project_page.py --final-dump final.pkl
 
-Self-contained: no internet needed to view it. It reads results/iwildcam/<run>/seed*/clips.csv.gz
-for the method as proposed (<encoder>) and the final method (<encoder>-boxes-preview-gated-tau),
-and draws a few test clips with the looks each version chose. MegaDetector boxes are drawn
-only for the reader; the method never sees them at test time.
+Layout and styles follow the Nerfies project page (CC BY-SA 4.0, credited in the footer); all
+files are local, so the page also works offline. Numbers come from results/iwildcam/: the
+method as proposed (<encoder>) and the final method (<encoder>-boxes-preview-gated-tau).
+MegaDetector boxes are used only to measure where looks land; the method never sees them.
 """
 import argparse
-import html
-import json
+import pickle
 import sys
 from pathlib import Path
 
-import numpy as np
-import pandas as pd
-from PIL import Image, ImageDraw
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+from matplotlib.lines import Line2D  # noqa: E402
+from PIL import Image  # noqa: E402
 
-sys.path.insert(0, str(Path(__file__).parent))
-from run_eval import heldout_cameras  # noqa: E402
-
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from eyes import paths  # noqa: E402
 from eyes.boxes import crop_labels, load_detections  # noqa: E402
+from eyes.controller import run  # noqa: E402
 from eyes.geometry import boxes  # noqa: E402
 
 ENCODERS = [("clip", "CLIP"), ("dinov2", "DINOv2"), ("dinov3", "DINOv3"), ("siglip2", "SigLIP 2")]
 FINAL = "-boxes-preview-gated-tau"
-BLUE, ORANGE = (42, 120, 214), (235, 104, 52)
+BLUE, ORANGE, AQUA = "#2a78d6", "#eb6834", "#1baf7a"
+INK, INK2, MUTED, GRID, NEUTRAL = "#111111", "#555555", "#8a8984", "#e6e5e1", "#bdbcb6"
+plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["Helvetica", "Arial", "DejaVu Sans"],
+                     "font.size": 11.5, "axes.edgecolor": NEUTRAL, "axes.labelcolor": INK2, "xtick.color": INK2,
+                     "ytick.color": INK2, "axes.linewidth": 0.6})
 
 
-def load(run):
-    files = sorted((paths.RESULTS / "iwildcam" / run).glob("seed*/clips.csv.gz"))
-    return pd.concat([pd.read_csv(f).assign(seed=f.parent.name) for f in files])
+# ------------------------------------------------------------------ numbers
+def load(run_name):
+    files = sorted((paths.RESULTS / "iwildcam" / run_name).glob("seed*/clips.csv.gz"))
+    return pd.concat([pd.read_csv(f) for f in files])
 
 
 def acc(r, m):
     x = r[r.method == m]
-    return None if x.empty else round(100 * float(x.correct.mean()), 1)
+    return None if x.empty else 100 * float(x.correct.mean())
 
 
 def numbers():
     out = {}
     for enc, name in ENCODERS:
         first, final = load(enc), load(enc + FINAL)
-        passes = lambda r, m: float(r[r.method == m].passes.mean())
+        looks = final[final.method == "eyesmix_stop"].passes.mean() - final[final.method == "glance"].passes.mean()
         out[enc] = dict(
             name=name,
-            first=dict(glance=acc(first, "glance"), eyes=[acc(first, f"eyes_b{b}") for b in (1, 2, 3, 4)],
-                       random=[acc(first, f"random_b{b}") for b in (1, 2, 3, 4)], all9=acc(first, "all9")),
+            first=dict(glance=acc(first, "glance"), eyes=[acc(first, f"eyes_b{b}") for b in (1, 2, 3, 4)]),
             final=dict(glance=acc(final, "glance"), eyes=[acc(final, f"eyesmix_b{b}") for b in (1, 2, 3, 4)],
                        random=[acc(final, f"random_b{b}") for b in (1, 2, 3, 4)], all9=acc(final, "all9"),
-                       stop=acc(final, "eyesmix_stop"),
-                       stop_looks=round(passes(final, "eyesmix_stop") - passes(final, "glance"), 2),
+                       stop=acc(final, "eyesmix_stop"), stop_looks=float(looks),
                        motion=acc(final, "motion_b2"), attention=acc(final, "attention_b2"),
                        hires=acc(final, "hires"), best_pair=acc(final, "best_pair")))
     return out
 
 
 def look_hits(frames, encoder="dinov2"):
-    """Share of 2 looks (all seeds) that land on a crop holding the animal, among crops that clearly
-    hold it or clearly don't (eyes/boxes.py: crop_labels); boxes are used only to measure this."""
+    """Share of 2 looks (3 seeds) on a crop holding the animal, among crops that clearly hold it or
+    clearly don't (eyes/boxes.py: crop_labels). Boxes are used only to measure this."""
     content = crop_labels(frames, load_detections(paths.DATA / "raw" / "iwildcam_mdv4" / "iwildcam2022_mdv4_detections.json"))
     rows_of = {cid: np.sort(idx) for cid, idx in frames.groupby("clip_id").indices.items()}
 
@@ -82,366 +87,228 @@ def look_hits(frames, encoder="dinov2"):
                 attention=share(final, "attention_b2"), eig_final=share(final, "eyesmix_b2"))
 
 
-def class_names(frames, seed):
-    """Class index -> species name, exactly as run_eval numbers the classes for this seed."""
+# ------------------------------------------------------------------ figures
+def clean(ax, keep=("bottom", "left")):
+    for s in ("top", "right", "bottom", "left"):
+        ax.spines[s].set_visible(s in keep)
+
+
+def fig_curves(data, out):
+    fig, axes = plt.subplots(1, 4, figsize=(11, 3.3))
+    for ax, (enc, _) in zip(axes, ENCODERS):
+        d = data[enc]
+        x = [0, 1, 2, 3, 4]
+        ax.axhline(d["final"]["all9"], color=MUTED, lw=1, ls=(0, (4, 3)))
+        ax.plot(x, [d["first"]["glance"]] + d["first"]["eyes"], color=ORANGE, lw=1.8, marker="D", ms=4)
+        ax.plot(x, [d["final"]["glance"]] + d["final"]["random"], color=AQUA, lw=1.8, marker="s", ms=4)
+        ax.plot(x, [d["final"]["glance"]] + d["final"]["eyes"], color=BLUE, lw=2.2, marker="o", ms=4.5)
+        ax.set_title(d["name"], fontsize=13, color=INK, loc="left", fontweight="bold")
+        ax.set_xticks(x)
+        ax.grid(axis="y", color=GRID, lw=0.6)
+        ax.set_axisbelow(True)
+        clean(ax)
+        ax.set_xlabel("looks per clip")
+    axes[0].set_ylabel("clip accuracy (%)")
+    handles = [Line2D([], [], color=BLUE, lw=2.2, marker="o", ms=4.5), Line2D([], [], color=AQUA, lw=1.8, marker="s", ms=4),
+               Line2D([], [], color=ORANGE, lw=1.8, marker="D", ms=4), Line2D([], [], color=MUTED, lw=1, ls=(0, (4, 3)))]
+    fig.legend(handles, ["eyes (final)", "random looks (final)", "eyes (as proposed)", "every crop, 10T passes (final)"],
+               loc="lower center", ncol=4, frameon=False, fontsize=11.5, bbox_to_anchor=(0.5, -0.02))
+    fig.tight_layout(rect=(0, 0.09, 1, 1))
+    fig.savefig(out, dpi=200)
+    plt.close(fig)
+
+
+def fig_diagnosis(hits, out):
+    """(a) the crop classifier alone, from scripts/diagnose_crops.py (DINOv2, seed 0); (b) where looks land."""
+    fig, (a, b) = plt.subplots(1, 2, figsize=(10, 3.2), gridspec_kw={"width_ratios": [1, 1.25]})
+    a.bar([-0.18, 0.82], [42.9, 17.5], width=0.34, color=ORANGE, label="as proposed")
+    a.bar([0.18], [85.5], width=0.34, color=BLUE, label="with an empty class")
+    for x, v in ((-0.18, 42.9), (0.82, 17.5), (0.18, 85.5)):
+        a.text(x, v + 2, f"{v:.0f}%", ha="center", fontsize=11, color=INK)
+    a.text(1.18, 6, "votes about 0\n(empty)", ha="center", fontsize=10.5, color=INK2)
+    a.set_xticks([0, 1])
+    a.set_xticklabels(["crop holds\nthe animal", "background\ncrop"])
+    a.set_ylim(0, 100)
+    a.set_ylabel("crop classifier top-1 (%)")
+    a.set_title("(a) one crop alone (DINOv2, seed 0)", loc="left", fontsize=12.5, color=INK, fontweight="bold")
+    a.legend(frameon=False, fontsize=10.5, loc="upper right")
+    a.grid(axis="y", color=GRID, lw=0.6)
+    a.set_axisbelow(True)
+    clean(a)
+    rows = [("eyes (final)", hits["eig_final"], BLUE), ("attention (B3)", hits["attention"], NEUTRAL),
+            ("motion (B4)", hits["motion"], NEUTRAL), ("eyes (as proposed)", hits["eig_first"], ORANGE),
+            ("random looks", hits["random"], AQUA)]
+    ys = list(range(len(rows)))[::-1]
+    for y, (_, v, c) in zip(ys, rows):
+        b.barh(y, v, height=0.56, color=c)
+        b.text(max(v, hits["chance"]) + 1.5, y, f"{v:.0f}%", va="center", fontsize=11, color=INK)
+    b.vlines(hits["chance"], -0.45, len(rows) - 0.55, color=MUTED, lw=1, ls=(0, (4, 3)))
+    b.text(hits["chance"] - 1.2, len(rows) - 0.3, f"chance {hits['chance']:.0f}%", ha="right", fontsize=10.5, color=INK2)
+    b.set_yticks(ys)
+    b.set_yticklabels([r[0] for r in rows])
+    b.set_xlim(0, 108)
+    b.set_ylim(-0.6, len(rows))
+    b.set_xlabel("looks that land on the animal (%)")
+    b.set_title("(b) where 2 looks land (DINOv2, 3 seeds)", loc="left", fontsize=12.5, color=INK, fontweight="bold")
+    b.tick_params(axis="y", length=0)
+    b.grid(axis="x", color=GRID, lw=0.6)
+    b.set_axisbelow(True)
+    clean(b, keep=("bottom",))
+    fig.tight_layout(w_pad=3)
+    fig.savefig(out, dpi=200)
+    plt.close(fig)
+
+
+def fig_method(dump, frames, out, clip_id=None):
+    """Glance -> P(animal) per crop -> 2x look -> belief, drawn from one real test clip."""
+    D = pickle.load(open(dump, "rb"))
     cats = pd.read_csv(paths.DATA / "raw" / "iwildcam_v2.0" / "categories.csv")
     name_of = dict(zip(cats["y"], cats["name"]))
-    train = frames[frames.split == "train"]
-    held = heldout_cameras(train, 0.10, np.random.default_rng(seed))
-    classes = np.sort(train[~train.camera.isin(held)].y_clip.unique())
-    return {i: name_of.get(int(y), str(y)) for i, y in enumerate(classes)}
+    names = {i: name_of[int(y)] for i, y in enumerate(D["classes"])}
+    clips = {c.clip_id: c for c in D["clips"]}
+    c = clips.get(clip_id, D["clips"][0])
+    o0, o2 = run(c, D["model"], D["rule"], budget=0), run(c, D["model"], D["rule"], budget=2)
+    rows = frames[frames.clip_id == c.clip_id].sort_values("frame_idx")
+    imgs = [Image.open(paths.DATA / "raw" / "iwildcam_v2.0" / p).convert("RGB") for p in rows.path]
+    f1, k1 = o2.looks[0]
+    W, H = imgs[f1].size
+
+    fig = plt.figure(figsize=(11, 2.5))
+    pos = [[0.005, 0.04, 0.235, 0.7], [0.255, 0.04, 0.235, 0.7], [0.505, 0.04, 0.235, 0.7], [0.775, 0.16, 0.2, 0.56]]
+    titles = [f"1  Glance at all {len(imgs)} frames", "2  P(animal) per crop",
+              "3  Look at the best crop (2x)", "4  Belief update"]
+    for (x, *_), t in zip(pos, titles):
+        fig.text(x + 0.003, 0.86, t, fontsize=12.5, color=INK, fontweight="bold")
+    fig.text(pos[3][0] + 0.003, 0.77, "grey: glance    blue: 2 looks", fontsize=10, color=INK2)
+    ax = fig.add_axes(pos[0])                                      # 1: a fanned stack of the frames
+    n = len(imgs)
+    for i, im in enumerate(imgs[::-1]):
+        j = n - 1 - i
+        x0, y0 = 0.22 * j / max(n - 1, 1), 0.18 * (n - 1 - j) / max(n - 1, 1)
+        ax.imshow(np.asarray(im.resize((320, 180))), extent=(x0, x0 + 1.6, y0, y0 + 0.9), zorder=i, aspect="auto")
+        ax.add_patch(plt.Rectangle((x0, y0), 1.6, 0.9, fill=False, ec="white", lw=1, zorder=i + 0.5))
+    ax.set_xlim(0, 1.84)
+    ax.set_ylim(0, 1.1)
+    ax.axis("off")
+    ax = fig.add_axes(pos[1])                                      # 2: P(animal) at each crop's centre
+    ax.imshow(np.asarray(imgs[f1]), aspect="auto")
+    b = boxes()[k1]
+    ax.add_patch(plt.Rectangle((b[0] * W, b[1] * H), 0.5 * W, 0.5 * H, fill=False, ec=BLUE, lw=2.4))
+    for k in range(9):
+        bb = boxes()[k + 1]
+        cx, cy = (bb[0] + bb[2]) / 2 * W, (bb[1] + bb[3]) / 2 * H
+        ax.text(cx, cy, f"{c.p_animal[f1, k]:.2f}", ha="center", va="center", fontsize=10,
+                color="white", fontweight="bold" if k + 1 == k1 else "normal",
+                bbox=dict(boxstyle="round,pad=0.18", fc=BLUE if k + 1 == k1 else (0, 0, 0, 0.5), ec="none"))
+    ax.axis("off")
+    ax = fig.add_axes(pos[2])                                      # 3: the look
+    ax.imshow(np.asarray(imgs[f1].crop((b[0] * W, b[1] * H, b[2] * W, b[3] * H))), aspect="auto")
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for sp in ax.spines.values():
+        sp.set_edgecolor(BLUE)
+        sp.set_linewidth(2.4)
+    ax = fig.add_axes(pos[3])                                      # 4: belief before and after
+    top = list(np.argsort(-o2.p)[:3])
+    ys = np.arange(len(top))[::-1] * 1.25
+    ax.barh(ys + 0.0, [o0.p[k] for k in top], height=0.3, color=NEUTRAL, label="after the glance")
+    ax.barh(ys - 0.32, [o2.p[k] for k in top], height=0.3, color=BLUE, label="after 2 looks")
+    for y, k in zip(ys, top):
+        ax.text(0, y + 0.3, names[k] + ("  (true)" if k == c.label else ""), fontsize=11,
+                color=INK, fontweight="bold" if k == c.label else "normal", style="normal" if k == c.label else "italic")
+    ax.set_yticks([])
+    ax.set_xlim(0, 1)
+    ax.set_xticks([0, 0.5, 1])
+    ax.set_ylim(-0.6, ys.max() + 0.65)
+    clean(ax, keep=("bottom",))
+    fig.savefig(out, dpi=200)
+    plt.close(fig)
 
 
-def draw_look(frame_path, look_k, det, colour, width=300):
-    """One frame, the 3x3 crop grid, the chosen crop, and (dashed) the detector's animal box."""
-    im = Image.open(frame_path).convert("RGB")
-    im = im.resize((width, round(width * im.height / im.width)))
-    W, H = im.size
-    over = Image.new("RGBA", im.size, (0, 0, 0, 0))
-    d = ImageDraw.Draw(over)
-    for t in (0.25, 0.5, 0.75):
-        d.line([(t * W, 0), (t * W, H)], fill=(255, 255, 255, 70), width=1)
-        d.line([(0, t * H), (W, t * H)], fill=(255, 255, 255, 70), width=1)
-    for conf, x, y, w, h in det:
-        if conf < 0.5:
-            continue
-        x0, y0, x1, y1 = x * W, y * H, (x + w) * W, (y + h) * H
-        for a, b in (((x0, y0), (x1, y0)), ((x1, y0), (x1, y1)), ((x1, y1), (x0, y1)), ((x0, y1), (x0, y0))):
-            n = max(int(np.hypot(b[0] - a[0], b[1] - a[1]) // 6), 1)
-            for i in range(0, n, 2):
-                p = (a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n)
-                q = (a[0] + (b[0] - a[0]) * (i + 1) / n, a[1] + (b[1] - a[1]) * (i + 1) / n)
-                d.line([p, q], fill=(255, 255, 255, 230), width=2)
-    bx = boxes()[look_k]
-    d.rectangle([bx[0] * W + 2, bx[1] * H + 2, bx[2] * W - 3, bx[3] * H - 3], outline=colour + (255,), width=4)
-    return Image.alpha_composite(im.convert("RGBA"), over).convert("RGB")
+# ------------------------------------------------------------------ page
+def fmt(v):
+    return "&ndash;" if v is None else f"{v:.1f}"
 
 
-def examples(frames, n, seed, encoder, out_dir):
-    names = class_names(frames, seed)
-    det = load_detections(paths.DATA / "raw" / "iwildcam_mdv4" / "iwildcam2022_mdv4_detections.json")
-    first = pd.read_csv(paths.RESULTS / "iwildcam" / encoder / f"seed{seed}" / "clips.csv.gz")
-    final = pd.read_csv(paths.RESULTS / "iwildcam" / (encoder + FINAL) / f"seed{seed}" / "clips.csv.gz")
-    a = first[first.method == "eyes_b2"].set_index("clip_id")
-    g = final[final.method == "glance"].set_index("clip_id")
-    b = final[final.method == "eyesmix_b2"].set_index("clip_id")
-    cand = b.index[b.correct & ~a.loc[b.index].correct & ~g.loc[b.index].correct & (b["T"] >= 2)]
-    rows_of = {cid: np.sort(idx) for cid, idx in frames.groupby("clip_id").indices.items()}
-    rng = np.random.default_rng(7)
-    picked, seen = [], set()
-    for cid in rng.permutation(cand):
-        lab = int(b.loc[cid, "label"])
-        if lab in seen:
-            continue
-        looks = {m: [tuple(map(int, s.split("-"))) for s in r.loc[cid, "looks"].split(";")] for m, r in (("a", a), ("b", b))}
-        files = {m: [frames.path.values[rows_of[cid][f]].split("/")[-1] for f, _ in looks[m]] for m in looks}
-        if not all(det.get(f) for f in files["b"]):
-            continue
-        seen.add(lab)
-        cards = {}
-        for m, colour in (("a", ORANGE), ("b", BLUE)):
-            imgs = []
-            for j, ((f, k), fname) in enumerate(zip(looks[m], files[m])):
-                im = draw_look(paths.DATA / "raw" / "iwildcam_v2.0" / "train" / fname, k, det.get(fname, []), colour)
-                rel = f"assets/{cid}_{m}{j}.jpg"
-                im.save(out_dir / rel, quality=82)
-                imgs.append(dict(src=rel, frame=f + 1, crop=k))
-            cards[m] = imgs
-        picked.append(dict(clip=cid, T=int(b.loc[cid, "T"]), truth=names[lab],
-                           glance=names[int(g.loc[cid, "pred"])], glance_conf=float(g.loc[cid, "conf"]),
-                           proposed=names[int(a.loc[cid, "pred"])], proposed_conf=float(a.loc[cid, "conf"]),
-                           final=names[int(b.loc[cid, "pred"])], final_conf=float(b.loc[cid, "conf"]), **cards))
-        if len(picked) == n:
-            break
-    return picked
+def table_html(data):
+    head = ("<tr><th>Encoder</th><th>Glance<br><span>T</span></th><th>Eyes, as proposed<br><span>T+2</span></th>"
+            "<th>Eyes, final<br><span>T+2</span></th><th>Eyes + stopping<br><span>looks/clip</span></th>"
+            "<th>Random<br><span>T+2</span></th><th>Motion (B4)<br><span>T+2</span></th>"
+            "<th>Attention (B3)<br><span>T+2</span></th><th>High-res (B1)<br><span>4T</span></th>"
+            "<th>Every crop<br><span>10T</span></th></tr>")
+    rows = []
+    for enc, _ in ENCODERS:
+        d, f = data[enc], data[enc]["final"]
+        rows.append(f"<tr><td>{d['name']}</td><td>{fmt(f['glance'])}</td><td>{fmt(d['first']['eyes'][1])}</td>"
+                    f"<td><b>{fmt(f['eyes'][1])}</b></td><td>{fmt(f['stop'])} ({f['stop_looks']:.1f})</td>"
+                    f"<td>{fmt(f['random'][1])}</td><td>{fmt(f['motion'])}</td><td>{fmt(f['attention'])}</td>"
+                    f"<td>{fmt(f['hires'])}</td><td>{fmt(f['all9'])}</td></tr>")
+    return f"<table class=\"table results-table\"><thead>{head}</thead><tbody>{''.join(rows)}</tbody></table>"
 
 
-def example_html(ex):
-    def strip(imgs):
-        return "".join(f'<figure><img src="{i["src"]}" alt="frame {i["frame"]}, crop {i["crop"]}" loading="lazy">'
-                       f'<figcaption>frame {i["frame"]}, crop {i["crop"]}</figcaption></figure>' for i in imgs)
-    e = {k: html.escape(str(v)) for k, v in ex.items() if isinstance(v, str)}
-    return f"""
-<article class="ex">
-  <header><h3><i>{e['truth']}</i></h3><span class="muted">test clip of {ex['T']} frames · glance alone said
-  <i>{e['glance']}</i> ({100 * ex['glance_conf']:.0f}%)</span></header>
-  <div class="pair">
-    <div><div class="tag t-orange">As proposed</div><div class="strip">{strip(ex['a'])}</div>
-      <p class="verdict bad">✗ <i>{e['proposed']}</i> ({100 * ex['proposed_conf']:.0f}%)</p></div>
-    <div><div class="tag t-blue">Final</div><div class="strip">{strip(ex['b'])}</div>
-      <p class="verdict good">✓ <i>{e['final']}</i> ({100 * ex['final_conf']:.0f}%)</p></div>
-  </div>
-</article>"""
+def compare_items(video_dir):
+    """The side-by-side videos listed (in order) by make_videos.py in videos.txt."""
+    items = []
+    listed = (video_dir / "videos.txt").read_text().split() if (video_dir / "videos.txt").exists() else []
+    for name in listed:
+        mp4 = video_dir / name
+        rel = f"static/videos/{mp4.name}"
+        items.append(f"""
+      <div class="item">
+        <video poster="{rel.replace('.mp4', '.jpg')}" controls muted loop playsinline preload="metadata" width="100%">
+          <source src="{rel}" type="video/mp4">
+        </video>
+      </div>""")
+    return "".join(items)
 
 
-PAGE = r"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Intelligent Eyes</title>
-<style>
-:root {
-  color-scheme: light;
-  --surface: #fcfcfb; --card: #ffffff; --ink: #0b0b0b; --ink2: #52514e; --muted: #8a8984;
-  --line: #e6e5e1; --blue: #2a78d6; --orange: #eb6834; --aqua: #1baf7a; --neutral: #b9b8b2;
-  --good: #0a7d0a; --bad: #c0392b;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    --surface: #1a1a19; --card: #232321; --ink: #f0efec; --ink2: #c3c2b7; --muted: #8f8e88;
-    --line: #3a3a37; --blue: #3987e5; --orange: #d95926; --aqua: #199e70; --neutral: #5f5e5a;
-    --good: #4cc24c; --bad: #e66767;
-  }
-}
-* { box-sizing: border-box; }
-body { margin: 0; background: var(--surface); color: var(--ink);
-  font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
-main { max-width: 1040px; margin: 0 auto; padding: 32px 16px 64px; }
-h1 { font-size: 2.1rem; line-height: 1.15; margin: 0 0 6px; letter-spacing: -0.01em; }
-h2 { font-size: 1.3rem; margin: 44px 0 10px; }
-h3 { font-size: 1.05rem; margin: 0; }
-p { margin: 6px 0 10px; }
-.sub { color: var(--ink2); font-size: 1.08rem; margin: 0 0 4px; }
-.muted { color: var(--ink2); font-size: 0.9rem; }
-a { color: var(--blue); }
-.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 24px 0 8px; }
-.stat { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
-.stat b { display: block; font-size: 1.6rem; line-height: 1.2; }
-.stat span { color: var(--ink2); font-size: 0.9rem; }
-.steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; padding: 0; list-style: none; counter-reset: s; }
-.steps li { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; counter-increment: s; }
-.steps li::before { content: counter(s); display: inline-grid; place-items: center; width: 22px; height: 22px; margin-right: 6px;
-  border-radius: 50%; background: var(--blue); color: #fff; font-size: 0.8rem; font-weight: 700; }
-.panel { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
-.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-bottom: 10px; }
-.seg button { font: inherit; font-size: 0.9rem; border: 0; background: transparent; color: var(--ink2); padding: 6px 12px; cursor: pointer; }
-.seg button[aria-pressed="true"] { background: var(--blue); color: #fff; }
-.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 0.85rem; color: var(--ink2); margin: 4px 0 0; }
-.legend i { display: inline-block; width: 18px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
-.chart-wrap { position: relative; }
-svg text { fill: var(--ink2); font-size: 12px; }
-.tip { position: absolute; pointer-events: none; background: var(--card); border: 1px solid var(--line); border-radius: 6px;
-  padding: 6px 8px; font-size: 0.82rem; box-shadow: 0 2px 8px rgba(0,0,0,.12); opacity: 0; transition: opacity .1s; white-space: nowrap; }
-.grid2 { display: grid; grid-template-columns: 1.25fr 1fr; gap: 14px; }
-@media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } }
-.bars { display: grid; gap: 8px; margin-top: 8px; }
-.bar { display: grid; grid-template-columns: 130px 1fr 42px; align-items: center; gap: 8px; font-size: 0.88rem; }
-.bar .track { position: relative; height: 16px; background: transparent; }
-.bar .fill { height: 100%; border-radius: 0 4px 4px 0; }
-.bar .chance { position: absolute; top: -4px; bottom: -4px; border-left: 1.5px dashed var(--muted); }
-table { border-collapse: collapse; width: 100%; font-size: 0.9rem; font-variant-numeric: tabular-nums; }
-th, td { padding: 6px 8px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
-th:first-child, td:first-child { text-align: left; }
-thead th { color: var(--ink2); font-weight: 600; font-size: 0.82rem; vertical-align: bottom; }
-td.best { font-weight: 700; color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
-.scroll { overflow-x: auto; }
-.ex { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 12px 0; }
-.ex header { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; margin-bottom: 10px; }
-.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-@media (max-width: 760px) { .pair { grid-template-columns: 1fr; } }
-.strip { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.strip figure { margin: 0; }
-.strip img { width: 100%; height: auto; display: block; border-radius: 6px; }
-.strip figcaption { font-size: 0.75rem; color: var(--ink2); margin-top: 2px; }
-.tag { display: inline-block; font-size: 0.78rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; color: #fff; margin-bottom: 6px; }
-.t-orange { background: var(--orange); } .t-blue { background: var(--blue); }
-.verdict { margin: 6px 0 0; font-weight: 600; }
-.verdict.good { color: var(--good); } .verdict.bad { color: var(--bad); }
-.fixes { padding-left: 1.2em; } .fixes li { margin: 6px 0; }
-code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; }
-pre { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; }
-footer { margin-top: 48px; color: var(--ink2); font-size: 0.85rem; }
-</style>
-</head>
-<body>
-<main>
-<h1>Intelligent Eyes</h1>
-<p class="sub">Teaching frozen ViT encoders where, and when, to look in video.</p>
-<p class="muted">Dawit Chun · DA411 Computational Mathematics, final project (Option A) ·
-<a href="../proposal.pdf">proposal</a> · <a href="../derivations.pdf">derivations</a></p>
+PAGE_FILE = Path(__file__).with_name("project_page_template.html")
 
-<div class="stats" id="stats"></div>
 
-<h2>How the eyes work</h2>
-<ol class="steps">
-  <li><b>Glance</b> at every frame of a camera-trap clip once, at 224&nbsp;px, with a frozen encoder.</li>
-  <li><b>Predict</b> what each of the 9T possible 2× zoomed crops would say, from the glance alone.</li>
-  <li><b>Look</b> where the expected information gain (EIG) is highest; stop when it falls below ε.</li>
-  <li><b>Combine</b> every vote with Bayes' rule, discounting repeated evidence through a fitted correlation R.</li>
-</ol>
-
-<h2>Accuracy as looks are added</h2>
-<div class="grid2">
-  <div class="panel">
-    <div class="seg" role="group" aria-label="encoder" id="enc"></div>
-    <div class="chart-wrap"><svg id="chart" viewBox="0 0 560 320" width="100%" role="img" aria-label="accuracy versus looks"></svg>
-      <div class="tip" id="tip"></div></div>
-    <div class="legend">
-      <span><i style="background:var(--blue)"></i>eyes, final</span>
-      <span><i style="background:var(--aqua)"></i>random looks, final</span>
-      <span><i style="background:var(--orange)"></i>eyes, as proposed</span>
-      <span><i style="border-top:2px dashed var(--muted);height:0"></i>every crop (10T passes)</span>
-    </div>
-  </div>
-  <div class="panel">
-    <h3>Where 2 looks land (DINOv2)</h3>
-    <p class="muted">Share of looks on a crop that holds the animal. Detector boxes are used only to measure this.</p>
-    <div class="bars" id="bars"></div>
-  </div>
-</div>
-
-<h2>All methods, all encoders</h2>
-<p class="muted">iWildCam test clips from 48 cameras never seen in training (3,930 clips, 3 seeds). Clip accuracy (%); T = frames per clip; looks are 2× crops. Underlined: best method at about T+2 passes.</p>
-<div class="panel scroll"><table id="table"></table></div>
-
-<h2>Side by side: the same clip, two versions of the eyes</h2>
-<p class="muted">Test clips where glancing alone was wrong. Each version took 2 looks (coloured squares). The dashed white box
-is the detector's animal box, drawn for you; the eyes never see it.</p>
-__EXAMPLES__
-
-<h2>What went wrong first, and what fixed it</h2>
-<p>As proposed, every look <em>lowered</em> accuracy. The cause: each crop was trained with the clip's species,
-although two thirds of crops show only background, so the crop classifier learned "this scenery means this species";
-and Bayes' rule then read a background crop's empty vote as evidence against the glance. Four changes, each fitted on
-held-out cameras:</p>
-<ol class="fixes">
-  <li><b>Crops get an <i>empty</i> class</b> (labels from animal boxes on training cameras), and the vote becomes
-      log(q(y|c)/π(y) + q(empty|c)): about 0 for background, the usual log-ratio for the animal.</li>
-  <li><b>Gated fusion:</b> a look whose crop shows no animal costs its pass but stays out of the combination.</li>
-  <li><b>A shared crop error</b> τ in R: a clip's crops share one error, so many crops count as about one extra frame.</li>
-  <li><b>Two-branch EIG:</b> EIG = P(animal) · EIG(animal branch), with P(animal) read from the glance's own tokens.</li>
-</ol>
-
-<h2>Run it</h2>
-<pre>uv venv --python 3.11 .venv && uv pip install --python .venv/bin/python -e ".[dev]"
-.venv/bin/python -m pytest                     # 43 tests, no data needed
-python scripts/synthetic_study.py              # the method on synthetic clips, no data needed
-# full pipeline (data download, encoding, evaluation): see README.md</pre>
-
-<footer>Data: WILDS iWildCam v2.0 and MegaDetector v4 boxes from the iWildCam 2022 metadata (CDLA-Permissive).
-Encoders used frozen: CLIP B/16, SigLIP 2 B/16, DINOv2 B/14, DINOv3 B/16.</footer>
-</main>
-
-<script>
-const DATA = __DATA__;
-const HITS = __HITS__;
-const ORDER = ["clip", "dinov2", "dinov3", "siglip2"];
-const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-
-// headline numbers
-(() => {
-  const g = ORDER.map(e => DATA[e].final.eyes[1] - DATA[e].final.glance);
-  const looks = ORDER.map(e => DATA[e].final.stop_looks);
-  const s = [
-    [`+${Math.min(...g).toFixed(1)} to +${Math.max(...g).toFixed(1)}`, "points over glancing, with 2 looks"],
-    [`${Math.round(HITS.eig_final)}%`, `of looks land on the animal (was ${Math.round(HITS.eig_first)}%)`],
-    [`${Math.min(...looks).toFixed(1)}–${Math.max(...looks).toFixed(1)}`, "looks per clip with the stopping rule"],
-    ["4 encoders", "CLIP, SigLIP 2, DINOv2, DINOv3, all frozen"]];
-  document.getElementById("stats").innerHTML = s.map(([b, t]) => `<div class="stat"><b>${b}</b><span>${t}</span></div>`).join("");
-})();
-
-// accuracy vs looks
-let current = "dinov2";
-function drawChart() {
-  const d = DATA[current], svg = document.getElementById("chart"), tip = document.getElementById("tip");
-  const W = 560, H = 320, L = 44, R = 150, T = 14, B = 48;
-  const series = [
-    {name: "eyes, final", c: css("--blue"), y: [d.final.glance, ...d.final.eyes]},
-    {name: "random looks, final", c: css("--aqua"), y: [d.final.glance, ...d.final.random]},
-    {name: "eyes, as proposed", c: css("--orange"), y: [d.first.glance, ...d.first.eyes]}];
-  const vals = series.flatMap(s => s.y).concat([d.final.all9]);
-  const lo = Math.floor((Math.min(...vals) - 1) / 4) * 4, hi = Math.ceil((Math.max(...vals) + 1) / 4) * 4;
-  const x = i => L + i * (W - L - R) / 4, y = v => T + (hi - v) * (H - T - B) / (hi - lo);
-  let s = "";
-  for (let v = lo; v <= hi; v += 4)
-    s += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="${css("--line")}"/>` +
-         `<text x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${v}</text>`;
-  for (let i = 0; i <= 4; i++) s += `<text x="${x(i)}" y="${H - B + 18}" text-anchor="middle">${i}</text>`;
-  s += `<text x="${(L + W - R) / 2}" y="${H - 6}" text-anchor="middle">looks per clip (0 = glance only)</text>`;
-  s += `<line x1="${L}" x2="${x(4)}" y1="${y(d.final.all9)}" y2="${y(d.final.all9)}" stroke="${css("--muted")}" stroke-dasharray="5 4"/>`;
-  const labelY = [];
-  series.forEach(se => {
-    s += `<polyline fill="none" stroke="${se.c}" stroke-width="2.2" stroke-linejoin="round" points="${se.y.map((v, i) => `${x(i)},${y(v)}`).join(" ")}"/>`;
-    se.y.forEach((v, i) => s += `<circle cx="${x(i)}" cy="${y(v)}" r="4.5" fill="${se.c}" stroke="${css("--card")}" stroke-width="1.5"/>`);
-    labelY.push([y(se.y[4]), `${se.name} ${se.y[4].toFixed(1)}`, css("--ink")]);
-  });
-  labelY.push([y(d.final.all9), `every crop ${d.final.all9.toFixed(1)}`, css("--ink2")]);
-  labelY.sort((a, b) => a[0] - b[0]);
-  for (let i = 1; i < labelY.length; i++) labelY[i][0] = Math.max(labelY[i][0], labelY[i - 1][0] + 14);
-  labelY.forEach(([ly, t, c]) => s += `<text x="${x(4) + 10}" y="${ly + 4}" style="fill:${c}">${t}</text>`);
-  for (let i = 0; i <= 4; i++)
-    s += `<rect x="${x(i) - 25}" y="${T}" width="50" height="${H - T - B}" fill="transparent" data-i="${i}"/>`;
-  svg.innerHTML = s;
-  svg.querySelectorAll("rect[data-i]").forEach(r => {
-    r.addEventListener("mousemove", ev => {
-      const i = +r.dataset.i, box = svg.getBoundingClientRect();
-      tip.innerHTML = `<b>${i === 0 ? "glance only" : i + (i === 1 ? " look" : " looks")}</b><br>` +
-        series.map(se => `<span style="color:${se.c}">●</span> ${se.name}: ${se.y[i].toFixed(1)}%`).join("<br>");
-      tip.style.left = Math.min(ev.clientX - box.left + 14, box.width - 190) + "px";
-      tip.style.top = (ev.clientY - box.top - 10) + "px";
-      tip.style.opacity = 1;
-    });
-    r.addEventListener("mouseleave", () => tip.style.opacity = 0);
-  });
-}
-const seg = document.getElementById("enc");
-seg.innerHTML = ORDER.map(e => `<button type="button" data-e="${e}" aria-pressed="${e === current}">${DATA[e].name}</button>`).join("");
-seg.addEventListener("click", ev => {
-  const b = ev.target.closest("button"); if (!b) return;
-  current = b.dataset.e;
-  seg.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b));
-  drawChart();
-});
-drawChart();
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", drawChart);
-
-// where looks land
-document.getElementById("bars").innerHTML = [
-  ["eyes, final", HITS.eig_final, "--blue"], ["attention (B3)", HITS.attention, "--neutral"],
-  ["motion (B4)", HITS.motion, "--neutral"], ["eyes, as proposed", HITS.eig_first, "--orange"],
-  ["random looks", HITS.random, "--aqua"]].map(([n, v, c]) =>
-  `<div class="bar"><span>${n}</span><span class="track"><span class="fill" style="display:block;width:${v}%;background:var(${c})"></span>` +
-  `<span class="chance" style="left:${HITS.chance}%" title="chance ${HITS.chance.toFixed(0)}%"></span></span><span>${v.toFixed(0)}%</span></div>`).join("") +
-  `<p class="muted" style="margin-top:6px">Dashed line: chance, ${HITS.chance.toFixed(0)}%.</p>`;
-
-// table
-(() => {
-  const cols = [["glance", "Glance", "T"], ["first_eyes", "Eyes as proposed", "T+2"], ["eyes", "Eyes, final", "T+2"],
-    ["stop", "Eyes + stopping", "≈T+1"], ["random", "Random", "T+2"], ["motion", "Motion (B4)", "T+2"],
-    ["attention", "Attention (B3)", "T+2"], ["hires", "High-res (B1)", "4T"], ["all9", "Every crop", "10T"]];
-  const row = e => { const f = DATA[e].final; return {glance: f.glance, first_eyes: DATA[e].first.eyes[1], eyes: f.eyes[1],
-    stop: f.stop, random: f.random[1], motion: f.motion, attention: f.attention, hires: f.hires, all9: f.all9}; };
-  let h = "<thead><tr><th>encoder</th>" + cols.map(c => `<th>${c[1]}<br><span class="muted">${c[2]} passes</span></th>`).join("") + "</tr></thead><tbody>";
-  ORDER.forEach(e => {
-    const r = row(e), cheap = ["eyes", "stop", "random", "motion", "attention", "first_eyes"].filter(k => r[k] != null);
-    const best = cheap.reduce((a, k) => r[k] > r[a] ? k : a, cheap[0]);
-    h += `<tr><td>${DATA[e].name}</td>` + cols.map(c => `<td class="${c[0] === best ? "best" : ""}">${r[c[0]] == null ? "—" : r[c[0]].toFixed(1)}</td>`).join("") + "</tr>";
-  });
-  document.getElementById("table").innerHTML = h + "</tbody>";
-})();
-</script>
-</body>
-</html>
+CSS = """body { font-family: 'Noto Sans', 'Helvetica Neue', Arial, sans-serif; }
+.publication-title, .publication-authors, .teaser { font-family: 'Google Sans', 'Noto Sans', 'Helvetica Neue', Arial, sans-serif; }
+.publication-authors { color: #4a4a4a; }
+.author-block { display: inline-block; }
+.link-block a { margin-top: 5px; margin-bottom: 5px; }
+.teaser .hero-body { padding-top: 0; padding-bottom: 3rem; }
+.teaser video { border-radius: 6px; }
+.figure { display: block; width: 100%; margin: 0.5rem 0 1.25rem; }
+.results-carousel { overflow: hidden; }
+.results-carousel .item { margin: 5px; overflow: hidden; border: 1px solid #bbb; border-radius: 10px; padding: 0; font-size: 0; }
+.results-carousel video { margin: 0; }
+.results-table { width: 100%; font-variant-numeric: tabular-nums; }
+.results-table th { font-weight: 600; font-size: 0.85rem; vertical-align: bottom; text-align: right; white-space: nowrap; }
+.results-table th span { font-weight: 400; color: #7a7a7a; }
+.results-table td { text-align: right; }
+.results-table th:first-child, .results-table td:first-child { text-align: left; }
+pre { white-space: pre; overflow-x: auto; }
 """
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=str(paths.REPO / "docs" / "project_page"))
-    ap.add_argument("--examples", type=int, default=4)
+    ap.add_argument("--final-dump", default="", help="pickle from run_eval --dump (final method) for the method figure")
+    ap.add_argument("--method-clip", default="test-22020")
     args = ap.parse_args()
     out = Path(args.out)
-    (out / "assets").mkdir(parents=True, exist_ok=True)
+    for sub in ("images", "css"):
+        (out / "static" / sub).mkdir(parents=True, exist_ok=True)
     frames = pd.read_csv(paths.processed("iwildcam") / "frames.csv")
     data = numbers()
     hits = look_hits(frames)
-    exs = examples(frames, args.examples, 0, "dinov2", out)
-    page = PAGE.replace("__DATA__", json.dumps(data)).replace("__HITS__", json.dumps(hits))
-    page = page.replace("__EXAMPLES__", "".join(example_html(e) for e in exs))
+    fig_curves(data, out / "static" / "images" / "curves.png")
+    fig_diagnosis(hits, out / "static" / "images" / "diagnosis.png")
+    if args.final_dump:
+        fig_method(args.final_dump, frames, out / "static" / "images" / "method.png", args.method_clip)
+    gains = [data[e]["final"]["eyes"][1] - data[e]["final"]["glance"] for e, _ in ENCODERS]
+    page = (PAGE_FILE.read_text().replace("__TABLE__", table_html(data))
+            .replace("__COMPARE__", compare_items(out / "static" / "videos"))
+            .replace("__GAINS__", f"{min(gains):.1f}&ndash;{max(gains):.1f}")
+            .replace("__HIT__", f"{hits['eig_final']:.0f}"))
+    (out / "static" / "css" / "index.css").write_text(CSS)
     (out / "index.html").write_text(page)
-    print(f"wrote {out / 'index.html'} with {len(exs)} examples")
+    print(f"wrote {out / 'index.html'}")
 
 
 if __name__ == "__main__":

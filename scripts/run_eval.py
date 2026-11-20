@@ -14,6 +14,7 @@ Outputs results/<dataset>/<encoder>/seed<k>/{clips.csv.gz, ranking.csv, pairs.cs
 """
 import argparse
 import json
+import pickle
 import time
 import zlib
 
@@ -327,6 +328,13 @@ def run_seed(frames, feats, hires, seed, out_dir, args, content=None):
     gate_t = crop_gate(tr, feats, probe_c, K) if gate_h is not None else None
     clips = build_clips(test_df, votes_t, mu_t, feats["thumb"][tr], feats["attn"][tr] if "attn" in feats else None,
                         branch=branch_t, gate=gate_t)
+    if args.dump:                       # save the fitted model and some test clips (for videos), skip the methods
+        keep = set(args.dump_clips.split(",")) if args.dump_clips else None
+        with open(args.dump, "wb") as fh:
+            pickle.dump(dict(model=model, clips=[c for c in clips if keep is None or c.clip_id in keep],
+                             classes=classes, rule="eig_mix" if preview is not None else "eig"), fh)
+        print(f"  dumped {args.dump}", flush=True)
+        return None
 
     methods = [("glance", "eig", 0, "R", 0.0, 1), ("glance_noR", "eig", 0, "I", 0.0, 1)]
     methods += [(f"eyes_b{b}", "eig", b, "R", 0.0, 1) for b in BUDGETS]
@@ -417,6 +425,8 @@ def main():
     ap.add_argument("--max-crop-rows", type=int, default=300_000)
     ap.add_argument("--ranking-clips", type=int, default=1000)
     ap.add_argument("--crop-labels", choices=["clip", "boxes"], default="clip")
+    ap.add_argument("--dump", default="", help="save the fitted model and test clips to this pickle, then stop")
+    ap.add_argument("--dump-clips", default="", help="comma-separated clip ids to save with --dump (default: all)")
     ap.add_argument("--crop-effect", choices=["none", "fit"], default="none",
                     help="fit: add an error shared by all crop votes of a clip to R (tau, fitted with lam)")
     ap.add_argument("--fusion", choices=["all", "gated"], default="all",

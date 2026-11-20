@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Intelligent Eyes: frozen ViT encoders glance at every frame of a video clip, then spend a few zoomed looks where expected information gain is highest.">
+  <title>Intelligent Eyes: Teaching Frozen ViT Models Where to Look in Video</title>
+  <link href="https://fonts.googleapis.com/css?family=Google+Sans|Noto+Sans|Castoro" rel="stylesheet">
+  <link rel="stylesheet" href="static/css/bulma.min.css">
+  <link rel="stylesheet" href="static/css/bulma-carousel.min.css">
+  <link rel="stylesheet" href="static/css/index.css">
+  <script defer src="static/js/fontawesome.all.min.js"></script>
+  <script src="static/js/bulma-carousel.min.js"></script>
+</head>
+<body>
+
+<section class="hero">
+  <div class="hero-body">
+    <div class="container is-max-desktop">
+      <div class="columns is-centered">
+        <div class="column has-text-centered">
+          <h1 class="title is-1 publication-title">Intelligent Eyes: Teaching Frozen ViT Models Where to Look in Video</h1>
+          <div class="is-size-5 publication-authors">
+            <span class="author-block">Dawit Chun</span>
+          </div>
+          <div class="is-size-5 publication-authors">
+            <span class="author-block">Taejae University &middot; DA411 Computational Mathematics, Fall 2026</span>
+          </div>
+          <div class="column has-text-centered">
+            <div class="publication-links">
+              <span class="link-block"><a href="../proposal.pdf" class="external-link button is-normal is-rounded is-dark">
+                <span class="icon"><i class="fas fa-file-pdf"></i></span><span>Proposal</span></a></span>
+              <span class="link-block"><a href="../derivations.pdf" class="external-link button is-normal is-rounded is-dark">
+                <span class="icon"><i class="fas fa-square-root-alt"></i></span><span>Derivations</span></a></span>
+              <span class="link-block"><a href="https://github.com/da-dawit/intelligent-eyes" class="external-link button is-normal is-rounded is-dark">
+                <span class="icon"><i class="fab fa-github"></i></span><span>Code</span></a></span>
+              <span class="link-block"><a href="../../results/iwildcam/summary_final.md" class="external-link button is-normal is-rounded is-dark">
+                <span class="icon"><i class="fas fa-table"></i></span><span>Results</span></a></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="hero teaser">
+  <div class="container is-max-desktop">
+    <div class="hero-body">
+      <video id="teaser" autoplay muted loop playsinline poster="static/videos/teaser.jpg" width="100%">
+        <source src="static/videos/teaser.mp4" type="video/mp4">
+      </video>
+      <h2 class="subtitle has-text-centered">
+        On cameras never seen in training, the eyes <b>glance</b> at every frame once, then take
+        <b>two 2&times; looks</b> where they expect to learn the most. Each bar chart is the belief the
+        method actually holds after that step.
+      </h2>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <div class="columns is-centered has-text-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3">Abstract</h2>
+        <div class="content has-text-justified">
+          <p>Frozen vision encoders such as CLIP and DINOv2 see every frame shrunk to 224 pixels, so a small animal
+          in a camera-trap clip may cover only a few patches. Zooming into every part of every frame fixes this,
+          at ten times the cost. We give a frozen encoder <i>eyes</i>: it glances at each frame once, predicts
+          what each of the 9<i>T</i> possible 2&times; crops would tell it, and spends a budget of looks on the
+          crops with the highest expected information gain, in closed form. Votes from all observations are
+          combined by Bayes' rule with a fitted correlation <i>R</i>, so repeated evidence is not counted twice.</p>
+          <p>As first proposed, every look <i>lowered</i> accuracy. We traced the cause: two thirds of crops show
+          only background, and a crop classifier trained on clip labels learned that scenery means species. With
+          crop labels from animal boxes (training only), gated fusion, a shared crop error in <i>R</i> and a
+          two-branch information gain, two looks now add <b>__GAINS__ points</b> over glancing on iWildCam test
+          cameras with four frozen encoders and land on the animal in <b>__HIT__%</b> of cases; with the stopping
+          rule, about one look per clip matches zooming everywhere.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3">Method</h2>
+    <img src="static/images/method.png" alt="The four steps of the eyes on a real test clip" class="figure">
+    <div class="content has-text-justified">
+      <p><b>1. Glance.</b> Every frame is encoded once at 224&nbsp;px; a linear classifier turns it into a vote
+      &ell;(<i>y</i>) = log <i>q</i>(<i>y</i>&nbsp;|&nbsp;frame) &minus; log &pi;(<i>y</i>).
+      <b>2. Predict each look.</b> From the glance's own patch tokens over a crop, linear classifiers predict
+      whether the crop holds the animal and what its vote would be. The information a look is expected to give is
+      EIG = <i>P</i>(animal) &middot; &frac12;(Var<sub><i>p</i></sub>[<i>m</i>] + <i>v</i>&thinsp;tr&thinsp;<i>F</i>),
+      the closed form for the animal branch; a look that shows only background changes nothing.
+      <b>3. Look.</b> The best crop is encoded at 2&times;. Its vote is
+      log(<i>q</i>(<i>y</i>&nbsp;|&nbsp;<i>c</i>)/&pi;(<i>y</i>) + <i>q</i>(empty&nbsp;|&nbsp;<i>c</i>)), which is about 0
+      for a background crop. <b>4. Update.</b> All votes are combined as
+      <i>p</i>(<i>y</i>) &prop; &pi;(<i>y</i>) exp(<b>w</b><sup>&#8868;</sup>&ell;(<i>y</i>)) with
+      <b>w</b> = <i>R</i><sup>&minus;1</sup><b>1</b> and
+      <i>R</i> = <i>T</i><sub>&rho;</sub> &otimes; <i>A</i><sub>&lambda;</sub> + &tau;&thinsp;<b>1</b><sub>c</sub><b>1</b><sub>c</sub><sup>&#8868;</sup>,
+      fitted on held-out cameras. Steps 2&ndash;4 repeat until the budget is spent or the best EIG falls below &epsilon;.</p>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3">Results</h2>
+    <div class="content has-text-justified">
+      <p>iWildCam (WILDS split): 3,930 test clips from 48 cameras never seen in training, 3 seeds, clip accuracy (%).
+      <i>T</i> is the number of frames in a clip; under each method is its number of encoder passes.</p>
+    </div>
+    <div class="table-container">__TABLE__</div>
+    <img src="static/images/curves.png" alt="Accuracy as looks are added, per encoder" class="figure">
+    <div class="content has-text-justified">
+      <p>As proposed (orange), each look made the answer worse. The final eyes (blue) gain most from the first look
+      and lose nothing from the next, beat randomly placed looks on every encoder, and with two looks match looking
+      at all nine crops of every frame (dashed) at a fraction of the passes. They also beat the 2&times; high-res
+      pass and the motion rule on every encoder; on DINOv3 the attention rule is 0.6 points ahead.</p>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3">Side by side</h2>
+    <div class="content has-text-justified">
+      <p>The same test clip with the eyes as proposed (left) and final (right). Glancing alone gets each of these
+      clips wrong; both versions take two looks.</p>
+    </div>
+    <div id="results-carousel" class="carousel results-carousel">__COMPARE__
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3">What went wrong first</h2>
+    <img src="static/images/diagnosis.png" alt="Diagnosis of the first failure mode" class="figure">
+    <div class="content has-text-justified">
+      <p>Animal boxes from MegaDetector, used here only as a measuring stick, showed the problem. A crop classifier
+      trained with the clip's species on every crop was right on only 43% of the crops that do hold the animal (a),
+      and the proposed eyes looked at the animal no more often than chance (b). Bayes' rule made it worse: it read a
+      background crop's near-zero vote as evidence <i>against</i> the glance. Training crops with an <i>empty</i>
+      class, leaving background looks out of the combination, adding a shared crop error to <i>R</i>, and splitting
+      the information gain into an animal and a background branch fixed both: crop accuracy rose to 86%, and the
+      final eyes find the animal in __HIT__% of their looks.</p>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3">Reproduce</h2>
+<pre><code>uv venv --python 3.11 .venv &amp;&amp; uv pip install --python .venv/bin/python -e ".[dev]"
+.venv/bin/python -m pytest                          # 43 tests, no data needed
+PYTHONPATH=. python scripts/synthetic_study.py      # the method on synthetic clips, no data needed
+# full pipeline: download -&gt; build_clips -&gt; cache_features -&gt; fetch_boxes -&gt; run_eval -&gt; summarize (README.md)</code></pre>
+  </div>
+</section>
+
+<section class="section" id="BibTeX">
+  <div class="container is-max-desktop content">
+    <h2 class="title">BibTeX</h2>
+<pre><code>@misc{chun2026eyes,
+  title  = {Intelligent Eyes: Teaching Frozen ViT Models Where to Look in Video},
+  author = {Chun, Dawit},
+  year   = {2026},
+  note   = {DA411 Computational Mathematics final project, Taejae University}
+}</code></pre>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="container">
+    <div class="columns is-centered">
+      <div class="column is-8">
+        <div class="content">
+          <p>Data: WILDS iWildCam v2.0 and MegaDetector v4 boxes from the iWildCam 2022 metadata (CDLA-Permissive).
+          Encoders used frozen: CLIP B/16, SigLIP&nbsp;2 B/16, DINOv2 B/14, DINOv3 B/16.</p>
+          <p>This page uses the <a href="https://github.com/nerfies/nerfies.github.io">Nerfies</a> project page
+          template, licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative
+          Commons Attribution-ShareAlike 4.0 International License</a>.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    if (window.bulmaCarousel) {
+      bulmaCarousel.attach("#results-carousel", {slidesToScroll: 1, slidesToShow: 1, loop: true, infinite: true,
+                                                  pagination: true, navigation: true});
+    }
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+body { font-family: 'Noto Sans', 'Helvetica Neue', Arial, sans-serif; }
+.publication-title, .publication-authors, .teaser { font-family: 'Google Sans', 'Noto Sans', 'Helvetica Neue', Arial, sans-serif; }
+.publication-authors { color: #4a4a4a; }
+.author-block { display: inline-block; }
+.link-block a { margin-top: 5px; margin-bottom: 5px; }
+.teaser .hero-body { padding-top: 0; padding-bottom: 3rem; }
+.teaser video { border-radius: 6px; }
+.figure { display: block; width: 100%; margin: 0.5rem 0 1.25rem; }
+.results-carousel { overflow: hidden; }
+.results-carousel .item { margin: 5px; overflow: hidden; border: 1px solid #bbb; border-radius: 10px; padding: 0; font-size: 0; }
+.results-carousel video { margin: 0; }
+.results-table { width: 100%; font-variant-numeric: tabular-nums; }
+.results-table th { font-weight: 600; font-size: 0.85rem; vertical-align: bottom; text-align: right; white-space: nowrap; }
+.results-table th span { font-weight: 400; color: #7a7a7a; }
+.results-table td { text-align: right; }
+.results-table th:first-child, .results-table td:first-child { text-align: left; }
+pre { white-space: pre; overflow-x: auto; }
