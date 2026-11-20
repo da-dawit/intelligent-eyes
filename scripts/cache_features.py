@@ -62,29 +62,44 @@ def main():
     dev = pick_device()
     enc = FrozenEncoder(args.encoder, dev)
     masks = torch.from_numpy(token_masks(enc.grid)).to(dev)
+    with_attn = args.encoder != "siglip2"
     root = Path(args.images)
 
-    for c in todo:
-        t0 = time.time()
-        lo, hi = c * args.chunk, min((c + 1) * args.chunk, len(frames))
-        paths = [str(root / p) for p in frames["path"].iloc[lo:hi]]
-        loader = DataLoader(Frames(paths), batch_size=args.batch, num_workers=args.workers)
-        G, C, U, TH, OK = [], [], [], [], []
-        for x, thumb, ok in loader:
-            x = x.to(dev).float() / 255.0
-            glances, crops = make_views(x)
-            g, patches = enc(glances)
-            ubar = crop_previews(patches, masks)
-            cf, _ = enc(crops.flatten(0, 1))
-            G.append(g.cpu().numpy().astype(np.float16))
-            U.append(ubar.cpu().numpy().astype(np.float16))
-            C.append(cf.reshape(len(x), 9, -1).cpu().numpy().astype(np.float16))
-            TH.append(thumb.numpy())
-            OK.append(ok.numpy())
-        np.savez(out / f"chunk_{c:05d}.npz", g=np.concatenate(G), crops=np.concatenate(C),
-                 ubar=np.concatenate(U), thumb=np.concatenate(TH), ok=np.concatenate(OK))
-        dt = time.time() - t0
-        print(f"chunk {c + 1}/{n_chunks}: {hi - lo} frames in {dt:.0f}s ({(hi - lo) / dt:.1f} frames/s)", flush=True)
+    # One loader over every pending row (workers start once), flushed chunk by chunk.
+    bounds = [(c, c * args.chunk, min((c + 1) * args.chunk, len(frames))) for c in todo]
+    rows = np.concatenate([np.arange(lo, hi) for _, lo, hi in bounds])
+    paths = [str(root / p) for p in frames["path"].values[rows]]
+    loader = DataLoader(Frames(paths), batch_size=args.batch, num_workers=args.workers,
+                        persistent_workers=args.workers > 0, prefetch_factor=4 if args.workers > 0 else None)
+    buf = {k: [] for k in ("g", "crops", "ubar", "thumb", "ok", "attn")}
+    n_buf, b_i, t0 = 0, 0, time.time()
+    for x, thumb, ok in loader:
+        x = x.to(dev).float() / 255.0
+        glances, crops = make_views(x)
+        g, patches = enc(glances)
+        cf, _ = enc(crops.flatten(0, 1))
+        buf["g"].append(g.cpu().numpy().astype(np.float16))
+        buf["ubar"].append(crop_previews(patches, masks).cpu().numpy().astype(np.float16))
+        buf["crops"].append(cf.reshape(len(x), 9, -1).cpu().numpy().astype(np.float16))
+        buf["thumb"].append(thumb.numpy())
+        buf["ok"].append(ok.numpy())
+        if with_attn:
+            a = enc.cls_attention(glances)                                       # (B, n, n)
+            mass = torch.einsum("bij,kij->bk", a, masks.float()) / a.sum(dim=(1, 2))[:, None]
+            buf["attn"].append(mass.cpu().numpy().astype(np.float16))
+        n_buf += len(x)
+        # flush every chunk that is now complete (batches may straddle a chunk boundary)
+        while b_i < len(bounds) and n_buf >= bounds[b_i][2] - bounds[b_i][1]:
+            c, lo, hi = bounds[b_i]
+            n = hi - lo
+            arrays = {k: np.concatenate(v) for k, v in buf.items() if v}
+            np.savez(out / f"chunk_{c:05d}.npz", **{k: v[:n] for k, v in arrays.items()})
+            buf = {k: [arrays[k][n:]] if k in arrays else [] for k in buf}       # keep the overflow
+            n_buf -= n
+            b_i += 1
+            dt = time.time() - t0
+            print(f"chunk {c + 1}/{n_chunks}: {n} frames in {dt:.0f}s ({n / dt:.1f} frames/s)", flush=True)
+            t0 = time.time()
 
 
 if __name__ == "__main__":

@@ -60,14 +60,20 @@ def predictor_inputs(rows, feats):
     return np.concatenate([u, g], axis=2).reshape(-1, 2 * u.shape[2])
 
 
-def build_clips(df, votes, mu, thumbs):
-    """Group consecutive frame rows of `df` (positional, aligned with the arrays) into Clips."""
+def build_clips(df, votes, mu, thumbs, attn=None):
+    """Group consecutive frame rows of `df` (positional, aligned with the arrays) into Clips.
+
+    look_scores: 'motion' (B4) from thumbnails; 'attention' (B3) when the cache has it.
+    """
     clips = []
     for cid, idx in df.groupby("clip_id", sort=False).indices.items():
         idx = np.sort(idx)
+        scores = {"motion": motion_scores(thumbs[idx])}
+        if attn is not None:
+            scores["attention"] = attn[idx].astype(np.float64)
         clips.append(Clip(votes=votes[idx].astype(np.float64), mu=mu[idx].astype(np.float64),
                           label=int(df["label"].iloc[idx[0]]), clip_id=cid, camera=int(df["camera"].iloc[idx[0]]),
-                          look_scores={"motion": motion_scores(thumbs[idx])}))
+                          look_scores=scores))
     return clips
 
 
@@ -140,7 +146,7 @@ def run_seed(frames, feats, seed, out_dir, args):
     mu_t = np.zeros_like(votes_t)
     mu_t[:, 1:] = pred.predict(predictor_inputs(tr, feats)).reshape(len(tr), 9, K)
     test_df = test_df.reset_index(drop=True)
-    clips = build_clips(test_df, votes_t, mu_t, feats["thumb"][tr])
+    clips = build_clips(test_df, votes_t, mu_t, feats["thumb"][tr], feats["attn"][tr] if "attn" in feats else None)
 
     methods = [("glance", "eig", 0, "R", 0.0, 1), ("glance_noR", "eig", 0, "I", 0.0, 1)]
     methods += [(f"eyes_b{b}", "eig", b, "R", 0.0, 1) for b in BUDGETS]
@@ -149,6 +155,7 @@ def run_seed(frames, feats, seed, out_dir, args):
                 ("eyes_noR_b2", "eig", 2, "I", 0.0, 1),
                 ("eyes_overlapR_b2", "eig", 2, "overlap", 0.0, 1),
                 ("motion_b2", "score:motion", 2, "R", 0.0, 1),
+                *([("attention_b2", "score:attention", 2, "R", 0.0, 1)] if "attn" in feats else []),
                 ("all9", "all", 0, "R", 0.0, 1),
                 ("all9_noR", "all", 0, "I", 0.0, 1)]
     methods += [(f"random_b{b}", "random", b, "R", 0.0, RANDOM_DRAWS) for b in BUDGETS]

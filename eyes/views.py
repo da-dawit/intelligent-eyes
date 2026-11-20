@@ -22,7 +22,7 @@ def load_frame(path: str) -> tuple[np.ndarray, np.ndarray]:
         im = im.convert("RGB")
         frame = im.resize((BASE, BASE), Image.BICUBIC)
     thumb = frame.convert("L").resize((THUMB, THUMB), Image.BILINEAR)
-    return np.asarray(frame), np.asarray(thumb)
+    return np.array(frame), np.array(thumb)
 
 
 def make_views(frames: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
