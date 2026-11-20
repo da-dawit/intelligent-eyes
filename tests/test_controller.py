@@ -91,3 +91,16 @@ def test_mixture_eig_reduces_to_one_branch():
     np.testing.assert_allclose(zero, eig_closed_form(p, c[:, None] * (corr - implied), v))
     half = eig_mixture(p, c, implied, corr, v, np.full(C, 0.5), mu_a)
     np.testing.assert_allclose(half, 0.5 * (one + zero))
+
+
+def test_gated_look_costs_a_pass_but_changes_nothing(world):
+    """With gated fusion a look that shows only background is left out of eq. (1)."""
+    from dataclasses import replace
+    c = world["test"][0]
+    no_gate = run(c, world["model"], "eig", budget=0)
+    blocked = replace(c, gate=np.zeros((c.T, 9), bool))
+    o = run(blocked, world["model"], "random", budget=2)
+    assert o.passes == c.T + 2
+    np.testing.assert_allclose(o.p, no_gate.p, atol=1e-12)
+    every = run(blocked, world["model"], "all")
+    np.testing.assert_allclose(every.p, no_gate.p, atol=1e-12)

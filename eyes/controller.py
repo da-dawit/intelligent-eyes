@@ -33,6 +33,9 @@ class Clip:
     look_scores: dict = field(default_factory=dict)   # name -> (T, 9) scores for B3/B4
     p_animal: np.ndarray | None = None  # (T, 9) P(crop shows the animal), from the glance (eig_mix)
     mu_animal: np.ndarray | None = None # (T, 9, K) predicted vote if it does (eig_mix)
+    gate: np.ndarray | None = None      # (T, 9) bool: once taken, does the crop show the animal?
+                                        # (its own classifier says so). Gated fusion leaves the
+                                        # others out of eq. (1); None = every look enters.
 
     @property
     def T(self) -> int:
@@ -69,6 +72,12 @@ class Outcome:
     best_eig: list                    # best EIG at each decision (nan for non-EIG rules)
     stopped: bool                     # stopped by eps before the budget ran out
     first_step: dict | None = None    # predicted vs realised gains at the first decision
+
+
+def enters(clip: Clip, i: int) -> bool:
+    """Does observation i enter eq. (1)? Glances always; looks unless gated out as background."""
+    k = i % N_POS
+    return clip.gate is None or k == 0 or bool(clip.gate[i // N_POS, k - 1])
 
 
 def glance_indices(T: int) -> list[int]:
@@ -110,7 +119,7 @@ def candidate_terms(clip: Clip, model: Model, S: list[int], L: list[int], C: lis
 
 
 def eig_mixture(p: np.ndarray, c: np.ndarray, implied: np.ndarray, correction: np.ndarray, v: np.ndarray,
-                p_animal: np.ndarray, mu_animal: np.ndarray) -> np.ndarray:
+                p_animal: np.ndarray, mu_animal: np.ndarray, gated: bool = False) -> np.ndarray:
     """EIG of a look whose vote has two branches: the crop shows the animal (probability
     p_animal, predicted vote mu_animal) or only background (vote 0, eyes/boxes.py).
 
@@ -118,10 +127,15 @@ def eig_mixture(p: np.ndarray, c: np.ndarray, implied: np.ndarray, correction: n
         m_A = c (mu_animal + correction - implied),   m_B = c (correction - implied)
 
     The split is exact for the expectation E[KL]; each branch uses the closed form of eq. (3).
+    With gated fusion a background look is left out of eq. (1), so its branch changes nothing:
+    EIG = p_animal EIG(m_A, v).
     """
     m_a = c[:, None] * (mu_animal + correction - implied)
+    eig_a = p_animal * eig_closed_form(p, m_a, v)
+    if gated:
+        return eig_a
     m_b = c[:, None] * (correction - implied)
-    return p_animal * eig_closed_form(p, m_a, v) + (1 - p_animal) * eig_closed_form(p, m_b, v)
+    return eig_a + (1 - p_animal) * eig_closed_form(p, m_b, v)
 
 
 def run(clip: Clip, model: Model, rule: str = "eig", budget: int = 2, eps: float = 0.0,
@@ -137,15 +151,17 @@ def run(clip: Clip, model: Model, rule: str = "eig", budget: int = 2, eps: float
     """
     rng = rng or np.random.default_rng(0)
     T = clip.T
-    S = glance_indices(T)
-    L: list[int] = []
+    S = glance_indices(T)              # observations in eq. (1)
+    L: list[int] = []                  # every look taken (each costs a pass)
+    L_in: list[int] = []               # looks taken that enter eq. (1)
     best_eig: list[float] = []
     stopped = False
     first = None
 
     if rule == "all":
         L = look_indices(T)
-        S = S + L
+        L_in = [i for i in L if enters(clip, i)]
+        S = S + L_in
         budget = 0
 
     for step in range(budget):
@@ -153,7 +169,7 @@ def run(clip: Clip, model: Model, rule: str = "eig", budget: int = 2, eps: float
         if not C:
             break
         if rule in ("eig", "eig_mc", "eig_mix") or (record_first and step == 0):
-            s, m, v, shift, (c, implied, corr) = candidate_terms(clip, model, S, L, C, parts=True)
+            s, m, v, shift, (c, implied, corr) = candidate_terms(clip, model, S, L_in, C, parts=True)
             p = softmax(s)
         if rule == "eig":
             value = eig_closed_form(p, m, v)
@@ -161,7 +177,7 @@ def run(clip: Clip, model: Model, rule: str = "eig", budget: int = 2, eps: float
             fk = [(i // N_POS, i % N_POS - 1) for i in C]
             pa = np.array([clip.p_animal[f, k] for f, k in fk])
             mu_a = np.stack([clip.mu_animal[f, k] for f, k in fk])
-            value = eig_mixture(p, c, implied, corr, v, pa, mu_a)
+            value = eig_mixture(p, c, implied, corr, v, pa, mu_a, gated=clip.gate is not None)
         elif rule == "eig_mc":
             value, _ = eig_monte_carlo(s, m, v, n_mc, rng)
         elif rule == "random":
@@ -191,7 +207,9 @@ def run(clip: Clip, model: Model, rule: str = "eig", budget: int = 2, eps: float
         else:
             best_eig.append(float("nan"))
         L.append(C[best])
-        S.append(C[best])
+        if enters(clip, C[best]):
+            L_in.append(C[best])
+            S.append(C[best])
 
     K = clip.votes.shape[-1]
     votes = clip.votes.reshape(-1, K)

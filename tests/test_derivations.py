@@ -222,3 +222,25 @@ def test_eig_vanishes_as_belief_becomes_sure():
         eig = eig_closed_form(p, m, v, cap=False)
         bound = (1 - p.max()) * (np.sum(m ** 2, axis=1) + v)
         assert np.all(eig <= bound + 1e-12)
+
+
+def test_masked_fit_matches_unmasked_when_nothing_is_masked():
+    from eyes.correlation import fit_A, fit_rho
+    rng = np.random.default_rng(0)
+    resid = rng.normal(size=(400, 10, 6))
+    clips, fidx = np.repeat(np.arange(100), 4), np.tile(np.arange(4), 100)
+    full = np.ones((400, 10), bool)
+    np.testing.assert_allclose(fit_A(resid, full), fit_A(resid), atol=1e-10)
+    assert abs(fit_rho(resid, clips, fidx, mask=full)[0] - fit_rho(resid, clips, fidx)[0]) < 1e-9
+
+
+def test_masked_fit_ignores_what_is_left_out():
+    """Garbage in masked-out entries must not change the fitted A."""
+    from eyes.correlation import fit_A
+    rng = np.random.default_rng(1)
+    resid = rng.normal(size=(500, 10, 5))
+    mask = rng.random((500, 10)) > 0.3
+    mask[:, 0] = True
+    dirty = resid.copy()
+    dirty[~mask] = 1e3 * rng.normal(size=((~mask).sum(), 5))
+    np.testing.assert_allclose(fit_A(dirty * mask[..., None], mask), fit_A(resid * mask[..., None], mask), atol=1e-10)

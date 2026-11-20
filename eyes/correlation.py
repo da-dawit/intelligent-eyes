@@ -93,54 +93,76 @@ def ar1_effective_frames(T: int, rho: float) -> float:
 
 # ----------------------------------------------------------------------------- fitting
 
-def class_conditional_residuals(votes: np.ndarray, labels: np.ndarray, n_classes: int) -> np.ndarray:
+def class_conditional_residuals(votes: np.ndarray, labels: np.ndarray, n_classes: int,
+                                mask: np.ndarray | None = None) -> np.ndarray:
     """Residuals e = vote - E[vote | position, true species], centred across species.
 
     votes : (N, 10, K) votes of N frames at the 10 positions
     labels: (N,) true species index of each frame's clip
+    mask  : optional (N, 10) bool, observations that enter eq. (1) (gated fusion: crops that
+            show only background are left out); means are taken over those only and the
+            residuals of the others are set to 0.
 
     Assumption (A2) says that *given the species* the votes are Gaussian with
     correlation R, so R is estimated from what is left after removing the
     species-and-position mean. Each residual vector is then centred across species,
     because adding the same amount to every species changes nothing (F 1 = 0, Lemma 6.4a).
     """
-    resid = np.empty_like(votes, dtype=np.float64)
+    resid = np.zeros_like(votes, dtype=np.float64)
+    m = np.ones(votes.shape[:2], bool) if mask is None else mask
     for c in range(n_classes):
         idx = labels == c
         if idx.any():
-            resid[idx] = votes[idx] - votes[idx].mean(axis=0, keepdims=True)
-    return resid - resid.mean(axis=2, keepdims=True)
+            w = m[idx][..., None].astype(np.float64)
+            mean = (votes[idx] * w).sum(axis=0, keepdims=True) / np.clip(w.sum(axis=0, keepdims=True), 1, None)
+            resid[idx] = (votes[idx] - mean) * w
+    return (resid - resid.mean(axis=2, keepdims=True)) * m[..., None]
 
 
-def fit_A(resid: np.ndarray) -> np.ndarray:
+def fit_A(resid: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
     """A[k, k'] = pooled correlation of residuals at positions k, k' in the same frame.
 
     resid: (N, 10, K). Pooled over frames and species components.
+    mask : optional (N, 10) bool; each pair (k, k') is then estimated only from the frames
+           where both observations enter eq. (1).
     """
     N, P, K = resid.shape
-    flat = resid.transpose(1, 0, 2).reshape(P, N * K)       # one long vector per position
-    cov = flat @ flat.T
-    d = np.sqrt(np.diag(cov))
-    return nearest_correlation(cov / d[:, None] / d[None, :])
+    if mask is None:
+        flat = resid.transpose(1, 0, 2).reshape(P, N * K)       # one long vector per position
+        cov = flat @ flat.T
+        d = np.sqrt(np.diag(cov))
+        return nearest_correlation(cov / d[:, None] / d[None, :])
+    m = mask.astype(np.float64)
+    r = resid * m[..., None]
+    cross = np.einsum("npk,nqk->pq", r, r)                    # sum over frames where both are present
+    sq = (r ** 2).sum(axis=2)                                 # (N, P)
+    a = (sq.T @ m)                                            # a[k, l] = sum_n m_nl |r_nk|^2
+    corr = cross / np.sqrt(np.clip(a * a.T, 1e-300, None))
+    np.fill_diagonal(corr, 1.0)
+    return nearest_correlation(corr)
 
 
-def fit_rho(resid: np.ndarray, clip_ids: np.ndarray, frame_idx: np.ndarray, max_lag: int = 4):
+def fit_rho(resid: np.ndarray, clip_ids: np.ndarray, frame_idx: np.ndarray, max_lag: int = 4,
+            mask: np.ndarray | None = None):
     """Fit rho so that same-position residuals d frames apart correlate like rho ** d.
 
     resid    : (N, 10, K) residuals of N frames
     clip_ids : (N,) clip of each frame;  frame_idx: (N,) position of the frame in its clip
     Returns (rho_hat, c_hat) where c_hat[d-1] is the measured pooled correlation at lag d.
     rho_hat minimises sum_d n_d (c_hat_d - rho^d)^2, weighting each lag by its pair count.
+    mask: optional (N, 10) bool; only pairs where both observations enter eq. (1) count.
     """
     order = np.lexsort((frame_idx, clip_ids))
     resid, clip_ids, frame_idx = resid[order], clip_ids[order], frame_idx[order]
+    m = np.ones(resid.shape[:2], bool) if mask is None else mask[order]
     c_hat, n_pairs = [], []
     for d in range(1, max_lag + 1):
         same = (clip_ids[d:] == clip_ids[:-d]) & (frame_idx[d:] - frame_idx[:-d] == d)
         if same.sum() < 10:
             break
-        a = resid[d:][same].ravel()
-        b = resid[:-d][same].ravel()
+        both = (m[d:] & m[:-d])[same][..., None]
+        a = (resid[d:][same] * both).ravel()
+        b = (resid[:-d][same] * both).ravel()
         c_hat.append(float(a @ b / np.sqrt((a @ a) * (b @ b))))
         n_pairs.append(int(same.sum()))
     if not c_hat:

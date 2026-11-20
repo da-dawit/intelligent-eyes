@@ -7,7 +7,7 @@ from __future__ import annotations
 import numpy as np
 
 from .belief import posterior
-from .controller import Clip, Model, glance_indices, look_indices, run
+from .controller import Clip, Model, enters, glance_indices, look_indices, run
 from .correlation import shrink
 
 
@@ -25,7 +25,8 @@ def fused_nll(clips: list[Clip], model: Model, n_random: int = 2, seed: int = 0)
         votes = c.votes.reshape(-1, K)
         G, Ls = glance_indices(c.T), look_indices(c.T)
         some = list(rng.choice(Ls, size=min(n_random, len(Ls)), replace=False))
-        for S in (G + some, G + Ls):
+        some, every = [i for i in some if enters(c, i)], [i for i in Ls if enters(c, i)]
+        for S in (G + some, G + every):
             p = posterior(votes[S], R[np.ix_(S, S)], model.log_prior, model.ridge)
             total += -np.log(p[c.label] + 1e-12) / 2
     return total / len(clips)

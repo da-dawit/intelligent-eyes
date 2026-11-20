@@ -72,19 +72,33 @@ def votes_for(rows, feats, probe_g, probe_c, log_prior, log_pi_crop=None, shape=
     return np.concatenate([lg[:, None], lc], axis=1).astype(np.float32)
 
 
+def crop_gate(rows, feats, probe_c, K):
+    """(N, 9) bool, gated fusion: once a look is taken, its own crop classifier decides whether
+    it shows the animal (q(empty | crop) < 1/2). Looks that show only background stay out of eq. (1)."""
+    D = feats["g"].shape[1]
+    lq = probe_c.log_probs(feats["crops"][rows].reshape(-1, D)).reshape(len(rows), 9, K + 1)
+    return np.exp(lq[..., K]) < 0.5
+
+
+def gate_mask(gate):
+    """(N, 10) observations that enter eq. (1): glances always, looks when gated in."""
+    return None if gate is None else np.concatenate([np.ones((len(gate), 1), bool), gate], axis=1)
+
+
 def choose_vote_shape(held_df, feats, probe_g, probe_c, log_prior, log_pi_crop, seed,
-                      eps_grid=(0.0, 0.1, 0.3), gain_grid=(1.0, 0.7, 0.5, 0.3)):
+                      eps_grid=(0.0, 0.1, 0.3), gain_grid=(1.0, 0.7, 0.5, 0.3), gate=None):
     """(eps, gain) with the lowest held-out NLL of eq. (1) (R refitted for each, lam chosen)."""
     hr, hy, K = held_df["row"].values, held_df["label"].values, len(log_prior)
     df = held_df.reset_index(drop=True)
+    mask = gate_mask(gate)
     table = {}
     for eps in eps_grid:
         for gain in gain_grid:
             v = votes_for(hr, feats, probe_g, probe_c, log_prior, log_pi_crop, (eps, gain))
-            r = class_conditional_residuals(v, hy, K)
-            rho, _ = fit_rho(r, df["clip_id"].values, df["frame_idx"].values)
-            lam, nll = choose_shrinkage(build_clips(df, v, np.zeros_like(v), feats["thumb"][hr]), fit_A(r), rho,
-                                        log_prior, 1.0, seed=seed)
+            r = class_conditional_residuals(v, hy, K, mask)
+            rho, _ = fit_rho(r, df["clip_id"].values, df["frame_idx"].values, mask=mask)
+            lam, nll = choose_shrinkage(build_clips(df, v, np.zeros_like(v), feats["thumb"][hr], gate=gate),
+                                        fit_A(r, mask), rho, log_prior, 1.0, seed=seed)
             table[f"{eps},{gain}"] = nll[lam]
     best = min(table, key=table.get)
     return tuple(map(float, best.split(","))), table
@@ -124,26 +138,31 @@ def predictor_inputs(rows, feats, preview=None):
     return np.concatenate(parts, axis=2).reshape(N * 9, -1)
 
 
-def animal_branch(rows, feats, preview, shape):
+def animal_branch(rows, feats, preview, shape, probe_w=None):
     """From the glance preview: P(crop shows the animal) (N, 9) and the vote it would give if
-    it does (N, 9, K), shaped like the real crop votes (eig_mix)."""
+    it does (N, 9, K), shaped like the real crop votes (eig_mix). probe_w: optional binary
+    'is the animal in this crop?' classifier on u_bar, used for P(animal) when given."""
     probe_u, log_pi_crop, where = preview
     u = feats["ubar"][rows].astype(np.float32)
     x = u if where is None else np.concatenate([u, where[rows]], axis=2)
     N, K = len(rows), len(log_pi_crop)
     lq = probe_u.log_probs(x.reshape(N * 9, -1)).reshape(N, 9, K + 1)
-    p_animal = np.clip(1.0 - np.exp(lq[..., K]), 1e-6, 1.0)
+    p_species = np.clip(1.0 - np.exp(lq[..., K]), 1e-6, 1.0)
     eps, gain = shape
     log_pi = np.log((1 - eps) * np.exp(log_pi_crop) + eps / K)
-    mu_animal = gain * (lq[..., :K] - np.log(p_animal)[..., None] - log_pi)
+    mu_animal = gain * (lq[..., :K] - np.log(p_species)[..., None] - log_pi)
+    p_animal = p_species
+    if probe_w is not None:
+        p_animal = np.exp(probe_w.log_probs(u.reshape(N * 9, -1))[:, 1]).reshape(N, 9)
     return p_animal.astype(np.float64), mu_animal.astype(np.float64)
 
 
-def build_clips(df, votes, mu, thumbs, attn=None, branch=None):
+def build_clips(df, votes, mu, thumbs, attn=None, branch=None, gate=None):
     """Group consecutive frame rows of `df` (positional, aligned with the arrays) into Clips.
 
     look_scores: 'motion' (B4) from thumbnails; 'attention' (B3) when the cache has it.
     branch: optional (p_animal, mu_animal) arrays for the eig_mix rule.
+    gate: optional (N, 9) bool for gated fusion.
     """
     clips = []
     for cid, idx in df.groupby("clip_id", sort=False).indices.items():
@@ -155,7 +174,8 @@ def build_clips(df, votes, mu, thumbs, attn=None, branch=None):
                           label=int(df["label"].iloc[idx[0]]), clip_id=cid, camera=int(df["camera"].iloc[idx[0]]),
                           look_scores=scores,
                           p_animal=None if branch is None else branch[0][idx],
-                          mu_animal=None if branch is None else branch[1][idx]))
+                          mu_animal=None if branch is None else branch[1][idx],
+                          gate=None if gate is None else gate[idx]))
     return clips
 
 
@@ -220,10 +240,18 @@ def run_seed(frames, feats, hires, seed, out_dir, args, content=None):
     acc_g = float(np.mean(probe_g.logits(feats["g"][hr]).argmax(1) == hy))
     acc_c = float(np.mean(lc_h[ok_c].argmax(1) == yh_c[ok_c]))
 
+    # ---- gated fusion: a look enters eq. (1) only if its crop shows the animal
+    gate_h = None
+    if args.fusion == "gated":
+        if content is None:
+            raise SystemExit("--fusion gated needs --crop-labels boxes")
+        gate_h = crop_gate(hr, feats, probe_c, K)
+
     # ---- votes, look predictor (eq. 2) on held-out
     shape, shape_table = (0.0, 1.0), {}
     if content is not None and args.vote_shape == "fit":
-        shape, shape_table = choose_vote_shape(held_df, feats, probe_g, probe_c, log_prior, log_pi_crop, seed)
+        shape, shape_table = choose_vote_shape(held_df, feats, probe_g, probe_c, log_prior, log_pi_crop, seed,
+                                               gate=gate_h)
     votes_h = votes_for(hr, feats, probe_g, probe_c, log_prior, log_pi_crop, shape)
     preview = None
     if args.predictor in ("preview", "preview_where"):
@@ -247,12 +275,25 @@ def run_seed(frames, feats, hires, seed, out_dir, args, content=None):
     mu_h[:, 1:] = out_of_fold(Xh, Yh, groups, pred.lam, seed=seed).reshape(len(hr), 9, K)
 
     # ---- repetition R = T_rho (x) A_lam on held-out (eq. 1)
-    resid = class_conditional_residuals(votes_h, hy, K)
-    A_fit = fit_A(resid)
-    rho, c_hat = fit_rho(resid, held_df["clip_id"].values, held_df["frame_idx"].values)
+    mask_h = gate_mask(gate_h)
+    resid = class_conditional_residuals(votes_h, hy, K, mask_h)
+    A_fit = fit_A(resid, mask_h)
+    rho, c_hat = fit_rho(resid, held_df["clip_id"].values, held_df["frame_idx"].values, mask=mask_h)
+
+    probe_w = None                       # 'is the animal in this crop?' from the glance (gated runs)
+    if preview is not None and args.fusion == "gated":
+        lab = content[fit_df["row"].values].reshape(-1)
+        okw = np.flatnonzero(lab >= 0)
+        if len(okw) > args.max_crop_rows:
+            okw = rng.choice(okw, args.max_crop_rows, replace=False)
+        Xu = feats["ubar"][fit_df["row"].values].reshape(-1, D)
+        probe_w = train_probe(Xu[okw].astype(np.float32), lab[okw].astype(int), 2, seed=seed)
+        lab_h = content[hr].reshape(-1)
+        okh = lab_h >= 0
+        probe_w.temperature = fit_temperature(probe_w.logits(feats["ubar"][hr].reshape(-1, D))[okh], lab_h[okh].astype(int))
     held_df = held_df.reset_index(drop=True)
-    branch_h = animal_branch(hr, feats, preview, shape) if preview is not None else None
-    held_clips = build_clips(held_df, votes_h, mu_h, feats["thumb"][hr], branch=branch_h)
+    branch_h = animal_branch(hr, feats, preview, shape, probe_w) if preview is not None else None
+    held_clips = build_clips(held_df, votes_h, mu_h, feats["thumb"][hr], branch=branch_h, gate=gate_h)
     lam, nll_table = choose_shrinkage(held_clips, A_fit, rho, log_prior, pred.sigma2, seed=seed)
     lam_ov, nll_ov = choose_shrinkage(held_clips, overlap_correlation(), rho, log_prior, pred.sigma2, seed=seed)
     model = Model(shrink(A_fit, lam), rho, log_prior, pred.sigma2)
@@ -279,9 +320,10 @@ def run_seed(frames, feats, hires, seed, out_dir, args, content=None):
     mu_t = np.zeros_like(votes_t)
     mu_t[:, 1:] = pred.predict(predictor_inputs(tr, feats, preview)).reshape(len(tr), 9, K)
     test_df = test_df.reset_index(drop=True)
-    branch_t = animal_branch(tr, feats, preview, shape) if preview is not None else None
+    branch_t = animal_branch(tr, feats, preview, shape, probe_w) if preview is not None else None
+    gate_t = crop_gate(tr, feats, probe_c, K) if gate_h is not None else None
     clips = build_clips(test_df, votes_t, mu_t, feats["thumb"][tr], feats["attn"][tr] if "attn" in feats else None,
-                        branch=branch_t)
+                        branch=branch_t, gate=gate_t)
 
     methods = [("glance", "eig", 0, "R", 0.0, 1), ("glance_noR", "eig", 0, "I", 0.0, 1)]
     methods += [(f"eyes_b{b}", "eig", b, "R", 0.0, 1) for b in BUDGETS]
@@ -372,6 +414,8 @@ def main():
     ap.add_argument("--max-crop-rows", type=int, default=300_000)
     ap.add_argument("--ranking-clips", type=int, default=1000)
     ap.add_argument("--crop-labels", choices=["clip", "boxes"], default="clip")
+    ap.add_argument("--fusion", choices=["all", "gated"], default="all",
+                    help="gated: a look enters eq. (1) only if its own crop classifier says it shows the animal")
     ap.add_argument("--vote-shape", choices=["fit", "none"], default="fit",
                     help="with --crop-labels boxes: fit the prior softening and gain of crop votes on held-out")
     ap.add_argument("--predictor", choices=["ridge", "preview", "preview_where"], default="ridge",
@@ -395,7 +439,7 @@ def main():
     if args.crop_labels == "boxes":
         content = crop_labels(frames, load_detections(args.md))
         tag = (f"{args.encoder}-boxes" + {"ridge": "", "preview": "-preview", "preview_where": "-where"}[args.predictor]
-               + ("-shaped" if args.vote_shape == "fit" else ""))
+               + ("-shaped" if args.vote_shape == "fit" else "") + ("-gated" if args.fusion == "gated" else ""))
         print(f"crop labels from boxes: {np.mean(content == 1):.1%} animal, {np.mean(content == 0):.1%} empty, "
               f"{np.mean(content == -1):.1%} unusable")
     for seed in args.seeds:
