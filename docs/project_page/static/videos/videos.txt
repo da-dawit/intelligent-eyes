@@ -1,4 +1,4 @@
-compare_test-22020.mp4
-compare_test-5531.mp4
-compare_test-8037.mp4
-compare_test-2415.mp4
+compare_test-22020.mp4	Francolinus nobilis	3
+compare_test-5531.mp4	Urocyon cinereoargenteus	10
+compare_test-8037.mp4	Equus ferus	10
+compare_test-2415.mp4	Dasyprocta punctata	5

@@ -6,6 +6,8 @@ Layout and styles follow the Nerfies project page (CC BY-SA 4.0, credited in the
 files are local, so the page also works offline. Numbers come from results/iwildcam/: the
 method as proposed (<encoder>) and the final method (<encoder>-boxes-preview-gated-tau).
 MegaDetector boxes are used only to measure where looks land; the method never sees them.
+Figures are drawn at the size they are shown (10 in = the 960 px page column) in a plain
+paper style; their explanations are in the HTML captions.
 """
 import argparse
 import pickle
@@ -17,7 +19,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
-from matplotlib.lines import Line2D  # noqa: E402
 from PIL import Image  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -28,22 +29,30 @@ from eyes.geometry import boxes  # noqa: E402
 
 ENCODERS = [("clip", "CLIP"), ("dinov2", "DINOv2"), ("dinov3", "DINOv3"), ("siglip2", "SigLIP 2")]
 FINAL = "-boxes-preview-gated-tau"
-BLUE, ORANGE, AQUA = "#2a78d6", "#eb6834", "#1baf7a"
-INK, INK2, MUTED, GRID, NEUTRAL = "#111111", "#555555", "#8a8984", "#e6e5e1", "#bdbcb6"
-plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["Helvetica", "Arial", "DejaVu Sans"],
-                     "font.size": 11.5, "axes.edgecolor": NEUTRAL, "axes.labelcolor": INK2, "xtick.color": INK2,
-                     "ytick.color": INK2, "axes.linewidth": 0.6})
+C_FINAL, C_FIRST, C_RANDOM, C_REF, C_BASE = "#1f77b4", "#ff7f0e", "#2ca02c", "#7f7f7f", "#b0b0b0"
+plt.rcParams.update({
+    "font.family": "serif", "font.serif": ["Times New Roman", "Times", "DejaVu Serif"], "mathtext.fontset": "stix",
+    "font.size": 12, "axes.labelsize": 12, "xtick.labelsize": 11, "ytick.labelsize": 11, "legend.fontsize": 11,
+    "axes.linewidth": 0.8, "xtick.direction": "in", "ytick.direction": "in", "xtick.top": True, "ytick.right": True,
+    "lines.linewidth": 1.6, "lines.markersize": 5, "legend.frameon": False, "savefig.bbox": "tight",
+    "savefig.pad_inches": 0.03})
 
 
 # ------------------------------------------------------------------ numbers
 def load(run_name):
     files = sorted((paths.RESULTS / "iwildcam" / run_name).glob("seed*/clips.csv.gz"))
-    return pd.concat([pd.read_csv(f) for f in files])
+    return pd.concat([pd.read_csv(f).assign(seed=f.parent.name) for f in files])
 
 
 def acc(r, m):
     x = r[r.method == m]
     return None if x.empty else 100 * float(x.correct.mean())
+
+
+def acc_seeds(r, m):
+    """Accuracy (%) per seed (random looks: averaged over draws first)."""
+    x = r[r.method == m]
+    return 100 * x.groupby("seed").correct.mean().values
 
 
 def numbers():
@@ -53,12 +62,15 @@ def numbers():
         looks = final[final.method == "eyesmix_stop"].passes.mean() - final[final.method == "glance"].passes.mean()
         out[enc] = dict(
             name=name,
-            first=dict(glance=acc(first, "glance"), eyes=[acc(first, f"eyes_b{b}") for b in (1, 2, 3, 4)]),
+            first=dict(glance=acc(first, "glance"), eyes=[acc(first, f"eyes_b{b}") for b in (1, 2, 3, 4)],
+                       curve=[acc_seeds(first, "glance")] + [acc_seeds(first, f"eyes_b{b}") for b in (1, 2, 3, 4)]),
             final=dict(glance=acc(final, "glance"), eyes=[acc(final, f"eyesmix_b{b}") for b in (1, 2, 3, 4)],
                        random=[acc(final, f"random_b{b}") for b in (1, 2, 3, 4)], all9=acc(final, "all9"),
                        stop=acc(final, "eyesmix_stop"), stop_looks=float(looks),
                        motion=acc(final, "motion_b2"), attention=acc(final, "attention_b2"),
-                       hires=acc(final, "hires"), best_pair=acc(final, "best_pair")))
+                       hires=acc(final, "hires"), best_pair=acc(final, "best_pair"),
+                       curve=[acc_seeds(final, "glance")] + [acc_seeds(final, f"eyesmix_b{b}") for b in (1, 2, 3, 4)],
+                       random_curve=[acc_seeds(final, "glance")] + [acc_seeds(final, f"random_b{b}") for b in (1, 2, 3, 4)]))
     return out
 
 
@@ -88,83 +100,71 @@ def look_hits(frames, encoder="dinov2"):
 
 
 # ------------------------------------------------------------------ figures
-def clean(ax, keep=("bottom", "left")):
-    for s in ("top", "right", "bottom", "left"):
-        ax.spines[s].set_visible(s in keep)
+def sublabel(ax, text, y=-0.2):
+    ax.text(0.5, y, text, transform=ax.transAxes, ha="center", va="top", fontsize=12)
 
 
 def fig_curves(data, out):
-    fig, axes = plt.subplots(1, 4, figsize=(11, 3.3))
-    for ax, (enc, _) in zip(axes, ENCODERS):
+    """Accuracy against the number of looks; mean and standard deviation over the 3 seeds."""
+    fig, axes = plt.subplots(1, 4, figsize=(10, 2.6))
+    x = np.arange(5)
+    for i, (ax, (enc, _)) in enumerate(zip(axes, ENCODERS)):
         d = data[enc]
-        x = [0, 1, 2, 3, 4]
-        ax.axhline(d["final"]["all9"], color=MUTED, lw=1, ls=(0, (4, 3)))
-        ax.plot(x, [d["first"]["glance"]] + d["first"]["eyes"], color=ORANGE, lw=1.8, marker="D", ms=4)
-        ax.plot(x, [d["final"]["glance"]] + d["final"]["random"], color=AQUA, lw=1.8, marker="s", ms=4)
-        ax.plot(x, [d["final"]["glance"]] + d["final"]["eyes"], color=BLUE, lw=2.2, marker="o", ms=4.5)
-        ax.set_title(d["name"], fontsize=13, color=INK, loc="left", fontweight="bold")
+        for ys, col, mk, lab in ((d["first"]["curve"], C_FIRST, "D", "as proposed"),
+                                 (d["final"]["random_curve"], C_RANDOM, "s", "random looks"),
+                                 (d["final"]["curve"], C_FINAL, "o", "final method")):
+            m = np.array([v.mean() for v in ys])
+            s = np.array([v.std() for v in ys])
+            ax.errorbar(x, m, yerr=s, color=col, marker=mk, capsize=2, label=lab, ms=4.5)
+        ax.axhline(d["final"]["all9"], color=C_REF, ls="--", lw=1, label="all crops ($10T$ passes)")
         ax.set_xticks(x)
-        ax.grid(axis="y", color=GRID, lw=0.6)
-        ax.set_axisbelow(True)
-        clean(ax)
         ax.set_xlabel("looks per clip")
-    axes[0].set_ylabel("clip accuracy (%)")
-    handles = [Line2D([], [], color=BLUE, lw=2.2, marker="o", ms=4.5), Line2D([], [], color=AQUA, lw=1.8, marker="s", ms=4),
-               Line2D([], [], color=ORANGE, lw=1.8, marker="D", ms=4), Line2D([], [], color=MUTED, lw=1, ls=(0, (4, 3)))]
-    fig.legend(handles, ["eyes (final)", "random looks (final)", "eyes (as proposed)", "every crop, 10T passes (final)"],
-               loc="lower center", ncol=4, frameon=False, fontsize=11.5, bbox_to_anchor=(0.5, -0.02))
-    fig.tight_layout(rect=(0, 0.09, 1, 1))
+        sublabel(ax, f"({'abcd'[i]}) {d['name']}", y=-0.34)
+    axes[0].set_ylabel("accuracy (%)")
+    h, l = axes[0].get_legend_handles_labels()
+    fig.legend(h, l, loc="upper center", ncol=4, bbox_to_anchor=(0.5, 1.1))
+    fig.tight_layout(w_pad=1.2)
     fig.savefig(out, dpi=200)
     plt.close(fig)
 
 
 def fig_diagnosis(hits, out):
-    """(a) the crop classifier alone, from scripts/diagnose_crops.py (DINOv2, seed 0); (b) where looks land."""
-    fig, (a, b) = plt.subplots(1, 2, figsize=(10, 3.2), gridspec_kw={"width_ratios": [1, 1.25]})
-    a.bar([-0.18, 0.82], [42.9, 17.5], width=0.34, color=ORANGE, label="as proposed")
-    a.bar([0.18], [85.5], width=0.34, color=BLUE, label="with an empty class")
-    for x, v in ((-0.18, 42.9), (0.82, 17.5), (0.18, 85.5)):
-        a.text(x, v + 2, f"{v:.0f}%", ha="center", fontsize=11, color=INK)
-    a.text(1.18, 6, "votes about 0\n(empty)", ha="center", fontsize=10.5, color=INK2)
+    """(a) the crop classifier alone (scripts/diagnose_crops.py, DINOv2 seed 0); (b) where 2 looks land."""
+    fig, (a, b) = plt.subplots(1, 2, figsize=(10, 2.7), gridspec_kw={"width_ratios": [1, 1.6]})
+    a.bar([0, 1], [42.9, 85.5], width=0.55, color=[C_FIRST, C_FINAL])
+    a.axhline(62.5, color=C_REF, ls="--", lw=1, label="glance, whole frame")
+    a.legend(loc="upper left")
     a.set_xticks([0, 1])
-    a.set_xticklabels(["crop holds\nthe animal", "background\ncrop"])
-    a.set_ylim(0, 100)
-    a.set_ylabel("crop classifier top-1 (%)")
-    a.set_title("(a) one crop alone (DINOv2, seed 0)", loc="left", fontsize=12.5, color=INK, fontweight="bold")
-    a.legend(frameon=False, fontsize=10.5, loc="upper right")
-    a.grid(axis="y", color=GRID, lw=0.6)
-    a.set_axisbelow(True)
-    clean(a)
-    rows = [("eyes (final)", hits["eig_final"], BLUE), ("attention (B3)", hits["attention"], NEUTRAL),
-            ("motion (B4)", hits["motion"], NEUTRAL), ("eyes (as proposed)", hits["eig_first"], ORANGE),
-            ("random looks", hits["random"], AQUA)]
-    ys = list(range(len(rows)))[::-1]
-    for y, (_, v, c) in zip(ys, rows):
-        b.barh(y, v, height=0.56, color=c)
-        b.text(max(v, hits["chance"]) + 1.5, y, f"{v:.0f}%", va="center", fontsize=11, color=INK)
-    b.vlines(hits["chance"], -0.45, len(rows) - 0.55, color=MUTED, lw=1, ls=(0, (4, 3)))
-    b.text(hits["chance"] - 1.2, len(rows) - 0.3, f"chance {hits['chance']:.0f}%", ha="right", fontsize=10.5, color=INK2)
-    b.set_yticks(ys)
-    b.set_yticklabels([r[0] for r in rows])
-    b.set_xlim(0, 108)
-    b.set_ylim(-0.6, len(rows))
-    b.set_xlabel("looks that land on the animal (%)")
-    b.set_title("(b) where 2 looks land (DINOv2, 3 seeds)", loc="left", fontsize=12.5, color=INK, fontweight="bold")
-    b.tick_params(axis="y", length=0)
-    b.grid(axis="x", color=GRID, lw=0.6)
-    b.set_axisbelow(True)
-    clean(b, keep=("bottom",))
+    a.set_xticklabels(["clip labels", "empty class"])
+    a.set_xlim(-0.6, 1.6)
+    a.set_ylim(0, 110)
+    a.set_yticks([0, 20, 40, 60, 80, 100])
+    a.set_ylabel("top-1 on animal crops (%)")
+    sublabel(a, "(a) crop classifier", y=-0.27)
+    names = ["random", "proposed", "motion", "attention", "final"]
+    vals = [hits["random"], hits["eig_first"], hits["motion"], hits["attention"], hits["eig_final"]]
+    cols = [C_RANDOM, C_FIRST, C_BASE, C_BASE, C_FINAL]
+    b.bar(np.arange(5), vals, width=0.6, color=cols)
+    b.axhline(hits["chance"], color=C_REF, ls="--", lw=1, label="chance")
+    b.legend(loc="upper left")
+    b.set_xticks(np.arange(5))
+    b.set_xticklabels(names)
+    b.set_xlim(-0.6, 4.6)
+    b.set_ylim(0, 110)
+    b.set_yticks([0, 20, 40, 60, 80, 100])
+    b.set_ylabel("looks on the animal (%)")
+    sublabel(b, "(b) where two looks land", y=-0.27)
     fig.tight_layout(w_pad=3)
     fig.savefig(out, dpi=200)
     plt.close(fig)
 
 
 def fig_method(dump, frames, out, clip_id=None):
-    """Glance -> P(animal) per crop -> 2x look -> belief, drawn from one real test clip."""
+    """(a) the glance frames, (b) P(animal) per crop, (c) the selected crop at 2x, (d) the posterior."""
     D = pickle.load(open(dump, "rb"))
     cats = pd.read_csv(paths.DATA / "raw" / "iwildcam_v2.0" / "categories.csv")
     name_of = dict(zip(cats["y"], cats["name"]))
-    names = {i: name_of[int(y)] for i, y in enumerate(D["classes"])}
+    names = {i: (lambda n: n[:1].upper() + n[1:])(name_of[int(y)]) for i, y in enumerate(D["classes"])}
     clips = {c.clip_id: c for c in D["clips"]}
     c = clips.get(clip_id, D["clips"][0])
     o0, o2 = run(c, D["model"], D["rule"], budget=0), run(c, D["model"], D["rule"], budget=2)
@@ -173,55 +173,52 @@ def fig_method(dump, frames, out, clip_id=None):
     f1, k1 = o2.looks[0]
     W, H = imgs[f1].size
 
-    fig = plt.figure(figsize=(11, 2.5))
-    pos = [[0.005, 0.04, 0.235, 0.7], [0.255, 0.04, 0.235, 0.7], [0.505, 0.04, 0.235, 0.7], [0.775, 0.16, 0.2, 0.56]]
-    titles = [f"1  Glance at all {len(imgs)} frames", "2  P(animal) per crop",
-              "3  Look at the best crop (2x)", "4  Belief update"]
-    for (x, *_), t in zip(pos, titles):
-        fig.text(x + 0.003, 0.86, t, fontsize=12.5, color=INK, fontweight="bold")
-    fig.text(pos[3][0] + 0.003, 0.77, "grey: glance    blue: 2 looks", fontsize=10, color=INK2)
-    ax = fig.add_axes(pos[0])                                      # 1: a fanned stack of the frames
-    n = len(imgs)
-    for i, im in enumerate(imgs[::-1]):
-        j = n - 1 - i
-        x0, y0 = 0.22 * j / max(n - 1, 1), 0.18 * (n - 1 - j) / max(n - 1, 1)
-        ax.imshow(np.asarray(im.resize((320, 180))), extent=(x0, x0 + 1.6, y0, y0 + 0.9), zorder=i, aspect="auto")
-        ax.add_patch(plt.Rectangle((x0, y0), 1.6, 0.9, fill=False, ec="white", lw=1, zorder=i + 0.5))
-    ax.set_xlim(0, 1.84)
-    ax.set_ylim(0, 1.1)
-    ax.axis("off")
-    ax = fig.add_axes(pos[1])                                      # 2: P(animal) at each crop's centre
-    ax.imshow(np.asarray(imgs[f1]), aspect="auto")
-    b = boxes()[k1]
-    ax.add_patch(plt.Rectangle((b[0] * W, b[1] * H), 0.5 * W, 0.5 * H, fill=False, ec=BLUE, lw=2.4))
-    for k in range(9):
-        bb = boxes()[k + 1]
-        cx, cy = (bb[0] + bb[2]) / 2 * W, (bb[1] + bb[3]) / 2 * H
-        ax.text(cx, cy, f"{c.p_animal[f1, k]:.2f}", ha="center", va="center", fontsize=10,
-                color="white", fontweight="bold" if k + 1 == k1 else "normal",
-                bbox=dict(boxstyle="round,pad=0.18", fc=BLUE if k + 1 == k1 else (0, 0, 0, 0.5), ec="none"))
-    ax.axis("off")
-    ax = fig.add_axes(pos[2])                                      # 3: the look
-    ax.imshow(np.asarray(imgs[f1].crop((b[0] * W, b[1] * H, b[2] * W, b[3] * H))), aspect="auto")
+    fig = plt.figure(figsize=(10, 2.5))
+    gs = fig.add_gridspec(1, 4, width_ratios=[0.6, 0.62, 1.05, 1.45], wspace=0.25, left=0.01, right=0.99,
+                          bottom=0.2, top=0.98)
+    caps = [f"(a) {len(imgs)} frames, 224 px", "(b) $P$(animal) per crop", f"(c) crop {k1}, frame {f1 + 1}, 2$\\times$",
+            "(d) posterior over species"]
+    for i, cap in enumerate(caps):
+        box = gs[i].get_position(fig)
+        fig.text((box.x0 + box.x1) / 2, 0.03, cap, ha="center", va="bottom", fontsize=12)
+    sub = gs[0].subgridspec(min(len(imgs), 3), 1, hspace=0.06)          # (a) the frames
+    for i, im in enumerate(imgs[:3]):
+        ax = fig.add_subplot(sub[i])
+        ax.imshow(np.asarray(im.resize((256, 144))))
+        ax.set_xticks([])
+        ax.set_yticks([])
+    ax = fig.add_subplot(gs[1])                                          # (b) P(animal), 3 x 3 crop offsets
+    pa = c.p_animal[f1].reshape(3, 3)
+    ax.imshow(pa, cmap="Blues", vmin=0, vmax=1)
+    for r in range(3):
+        for q in range(3):
+            ax.text(q, r, f"{pa[r, q]:.2f}", ha="center", va="center", fontsize=10,
+                    color="white" if pa[r, q] > 0.6 else "black")
+    r1, q1 = divmod(k1 - 1, 3)
+    ax.add_patch(plt.Rectangle((q1 - 0.5, r1 - 0.5), 1, 1, fill=False, ec="black", lw=2))
     ax.set_xticks([])
     ax.set_yticks([])
-    for sp in ax.spines.values():
-        sp.set_edgecolor(BLUE)
-        sp.set_linewidth(2.4)
-    ax = fig.add_axes(pos[3])                                      # 4: belief before and after
-    top = list(np.argsort(-o2.p)[:3])
-    ys = np.arange(len(top))[::-1] * 1.25
-    ax.barh(ys + 0.0, [o0.p[k] for k in top], height=0.3, color=NEUTRAL, label="after the glance")
-    ax.barh(ys - 0.32, [o2.p[k] for k in top], height=0.3, color=BLUE, label="after 2 looks")
-    for y, k in zip(ys, top):
-        ax.text(0, y + 0.3, names[k] + ("  (true)" if k == c.label else ""), fontsize=11,
-                color=INK, fontweight="bold" if k == c.label else "normal", style="normal" if k == c.label else "italic")
+    ax = fig.add_subplot(gs[2])                                          # (c) the selected crop at 2x
+    b = boxes()[k1]
+    ax.imshow(np.asarray(imgs[f1].crop((b[0] * W, b[1] * H, b[2] * W, b[3] * H))))
+    ax.set_xticks([])
     ax.set_yticks([])
+    inner = gs[3].subgridspec(1, 2, width_ratios=[0.85, 1], wspace=0.02)  # (d) names | bars
+    ax = fig.add_subplot(inner[1])
+    top = list(np.argsort(-o2.p)[:3])[::-1]
+    y = np.arange(len(top))
+    ax.barh(y + 0.19, [o0.p[k] for k in top], height=0.36, color=C_BASE, label="glance")
+    ax.barh(y - 0.19, [o2.p[k] for k in top], height=0.36, color=C_FINAL, label="+ 2 looks")
+    ax.set_yticks(y)
+    ax.set_yticklabels([names[k] for k in top], fontsize=10.5, fontstyle="italic")
+    for lab, k in zip(ax.get_yticklabels(), top):
+        if k == c.label:
+            lab.set_fontweight("bold")
+    ax.tick_params(axis="y", left=False, right=False)
     ax.set_xlim(0, 1)
     ax.set_xticks([0, 0.5, 1])
-    ax.set_ylim(-0.6, ys.max() + 0.65)
-    clean(ax, keep=("bottom",))
-    fig.savefig(out, dpi=200)
+    ax.legend(loc="lower right", fontsize=10)
+    fig.savefig(out, dpi=200, bbox_inches=None)
     plt.close(fig)
 
 
@@ -231,11 +228,11 @@ def fmt(v):
 
 
 def table_html(data):
-    head = ("<tr><th>Encoder</th><th>Glance<br><span>T</span></th><th>Eyes, as proposed<br><span>T+2</span></th>"
-            "<th>Eyes, final<br><span>T+2</span></th><th>Eyes + stopping<br><span>looks/clip</span></th>"
+    head = ("<tr><th>Encoder</th><th>Glance<br><span>T</span></th><th>As proposed<br><span>T+2</span></th>"
+            "<th>Final<br><span>T+2</span></th><th>Final + stopping<br><span>looks/clip</span></th>"
             "<th>Random<br><span>T+2</span></th><th>Motion (B4)<br><span>T+2</span></th>"
             "<th>Attention (B3)<br><span>T+2</span></th><th>High-res (B1)<br><span>4T</span></th>"
-            "<th>Every crop<br><span>10T</span></th></tr>")
+            "<th>All crops<br><span>10T</span></th></tr>")
     rows = []
     for enc, _ in ENCODERS:
         d, f = data[enc], data[enc]["final"]
@@ -247,23 +244,24 @@ def table_html(data):
 
 
 def compare_items(video_dir):
-    """The side-by-side videos listed (in order) by make_videos.py in videos.txt."""
+    """The side-by-side videos listed (in order) by make_videos.py in videos.txt: file, species, frames."""
     items = []
-    listed = (video_dir / "videos.txt").read_text().split() if (video_dir / "videos.txt").exists() else []
-    for name in listed:
-        mp4 = video_dir / name
-        rel = f"static/videos/{mp4.name}"
+    lines = (video_dir / "videos.txt").read_text().splitlines() if (video_dir / "videos.txt").exists() else []
+    for i, line in enumerate(filter(None, lines)):
+        name, species, T = line.split("\t")
+        rel = f"static/videos/{name}"
         items.append(f"""
-      <div class="item">
-        <video poster="{rel.replace('.mp4', '.jpg')}" controls muted loop playsinline preload="metadata" width="100%">
-          <source src="{rel}" type="video/mp4">
-        </video>
-      </div>""")
+    <div class="video-block">
+      <video poster="{rel.replace('.mp4', '.jpg')}" controls autoplay muted loop playsinline preload="metadata" width="100%">
+        <source src="{rel}" type="video/mp4">
+      </video>
+      <p class="caption"><b>Video {i + 2}.</b> <i>{species}</i>, {T} frames. Left: method as proposed;
+      right: final method.</p>
+    </div>""")
     return "".join(items)
 
 
 PAGE_FILE = Path(__file__).with_name("project_page_template.html")
-
 
 CSS = """body { font-family: 'Noto Sans', 'Helvetica Neue', Arial, sans-serif; }
 .publication-title, .publication-authors, .teaser { font-family: 'Google Sans', 'Noto Sans', 'Helvetica Neue', Arial, sans-serif; }
@@ -271,10 +269,11 @@ CSS = """body { font-family: 'Noto Sans', 'Helvetica Neue', Arial, sans-serif; }
 .author-block { display: inline-block; }
 .link-block a { margin-top: 5px; margin-bottom: 5px; }
 .teaser .hero-body { padding-top: 0; padding-bottom: 3rem; }
-.teaser video { border-radius: 6px; }
-.figure { display: block; width: 100%; margin: 0.5rem 0 1.25rem; }
-.results-carousel { overflow: hidden; }
-.results-carousel .item { margin: 5px; overflow: hidden; border: 1px solid #bbb; border-radius: 10px; padding: 0; font-size: 0; }
+.figure { display: block; width: 100%; margin: 0.75rem 0 0.25rem; }
+.caption { font-size: 0.92rem; color: #4a4a4a; margin-bottom: 1.5rem; text-align: justify; }
+.caption b { color: #363636; }
+.results-carousel { overflow: hidden; padding: 0 3rem; }
+.results-carousel .item { margin: 5px; overflow: hidden; border: 1px solid #ddd; padding: 0; font-size: 0; }
 .results-carousel video { margin: 0; }
 .results-table { width: 100%; font-variant-numeric: tabular-nums; }
 .results-table th { font-weight: 600; font-size: 0.85rem; vertical-align: bottom; text-align: right; white-space: nowrap; }
@@ -305,7 +304,9 @@ def main():
     page = (PAGE_FILE.read_text().replace("__TABLE__", table_html(data))
             .replace("__COMPARE__", compare_items(out / "static" / "videos"))
             .replace("__GAINS__", f"{min(gains):.1f}&ndash;{max(gains):.1f}")
-            .replace("__HIT__", f"{hits['eig_final']:.0f}"))
+            .replace("__HIT__", f"{hits['eig_final']:.0f}")
+            .replace("__CHANCE__", f"{hits['chance']:.0f}")
+            .replace("__FIRST_HIT__", f"{hits['eig_first']:.0f}"))
     (out / "static" / "css" / "index.css").write_text(CSS)
     (out / "index.html").write_text(page)
     print(f"wrote {out / 'index.html'}")
