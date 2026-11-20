@@ -53,8 +53,11 @@ Hardware used: Apple M5 Pro (MPS), 51 GB RAM.
 
 ```bash
 export PYTHONPATH=.
-# 0. data: WILDS iWildCam v2.0 (12 GB, frames 448 px tall)
-hf download pangwei/wilds-iwildcam iwildcam_v2.0.tar.gz --repo-type dataset --local-dir $EYES_DATA/raw
+# 0. data: WILDS iWildCam v2.0 (12 GB, frames 448 px tall). The downloader is parallel,
+#    resumable across dropped connections, and checks the SHA-256.
+python scripts/download.py \
+    https://huggingface.co/datasets/pangwei/wilds-iwildcam/resolve/78b5e7d858adb01cb5661c7b5f8666a4e91be2cb/iwildcam_v2.0.tar.gz \
+    $EYES_DATA/raw/iwildcam_v2.0.tar.gz --sha256 05c872f46eee44315f79bc90f4098c69ae3799a2b95116db02292ea1b4e370d2
 tar xzf $EYES_DATA/raw/iwildcam_v2.0.tar.gz -C $EYES_DATA/raw
 
 # 1. clips: WILDS sequences -> bursts of 1-10 frames, one species each
