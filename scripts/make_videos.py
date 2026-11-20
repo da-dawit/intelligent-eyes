@@ -25,15 +25,13 @@ from eyes.controller import run  # noqa: E402
 from eyes.geometry import boxes  # noqa: E402
 
 FPS = 12
-INK, INK2, MUTED, RULE, BG = (17, 17, 17), (85, 85, 85), (150, 150, 150), (225, 225, 225), (255, 255, 255)
-BLUE, ORANGE, GREEN, RED = (42, 120, 214), (235, 104, 52), (20, 130, 60), (200, 50, 45)
-FONT_DIR = Path("/System/Library/Fonts/Supplemental")
+BLUE, ORANGE = (31, 119, 180), (255, 127, 14)
+FONT_FILE = "/System/Library/Fonts/HelveticaNeue.ttc"
 
 
-def font(size, style=""):
-    name = {"": "Arial.ttf", "b": "Arial Bold.ttf", "i": "Arial Italic.ttf"}[style]
+def font(size, bold=False):
     try:
-        return ImageFont.truetype(str(FONT_DIR / name), size)
+        return ImageFont.truetype(FONT_FILE, size, index=1 if bold else 0)
     except OSError:
         return ImageFont.load_default()
 
@@ -51,55 +49,6 @@ def trajectory(clip, model, rule):
     return dict(p=[o0.p, o1.p, o2.p], looks=looks, entered=entered, pred=o2.pred)
 
 
-class Panel:
-    """One version of the eyes on one clip: draws the frame view and the belief bars."""
-
-    def __init__(self, name, colour, traj, frames, names, label, w, frame_h, bars_h):
-        self.name, self.colour, self.t, self.frames, self.names, self.label = name, colour, traj, frames, names, label
-        self.w, self.fh, self.bh = w, frame_h, bars_h
-        final = traj["p"][-1]
-        top = list(np.argsort(-final)[:3])
-        if label not in top:
-            top = top[:2] + [label]
-        self.top = top
-
-    def view(self, f, window=None, box=None):
-        im = self.frames[f]
-        W, H = im.size
-        x0, y0, x1, y1 = window if window is not None else (0, 0, W, H)
-        v = im.crop((round(x0), round(y0), round(x1), round(y1))).resize((self.w, self.fh), Image.BICUBIC)
-        d = ImageDraw.Draw(v)
-        if window is None:
-            for t in (0.25, 0.5, 0.75):
-                d.line([(t * self.w, 0), (t * self.w, self.fh)], fill=(255, 255, 255), width=1)
-                d.line([(0, t * self.fh), (self.w, t * self.fh)], fill=(255, 255, 255), width=1)
-        if box is not None:
-            sx, sy = self.w / (x1 - x0), self.fh / (y1 - y0)
-            bx = [(box[0] - x0) * sx, (box[1] - y0) * sy, (box[2] - x0) * sx, (box[3] - y0) * sy]
-            d.rectangle([bx[0] + 2, bx[1] + 2, bx[2] - 3, bx[3] - 3], outline=self.colour, width=5)
-        return v
-
-    def label_of(self, k):
-        return sci(self.names[k]) + (" (true)" if k == self.label else "")
-
-    def bars(self, p):
-        img = Image.new("RGB", (self.w, self.bh), BG)
-        d = ImageDraw.Draw(img)
-        row = self.bh // 4
-        widths = [font(16, "b" if k == self.label else "i").getlength(self.label_of(k)) for k in self.top]
-        name_w = int(min(max(widths) + 18, 0.6 * self.w))           # the name column fits the longest name
-        d.text((0, 2), "Posterior over species (top 3)", font=font(15), fill=INK2)
-        if p is None:
-            return img
-        for r, k in enumerate(self.top):
-            y = 2 + (r + 1) * row
-            d.text((0, y), self.label_of(k), font=font(16, "i" if k != self.label else "b"), fill=INK)
-            bw = (self.w - name_w - 60) * float(p[k])
-            d.rectangle([name_w, y + 3, name_w + max(bw, 1), y + row - 10], fill=self.colour if k == self.label else (190, 190, 186))
-            d.text((name_w + bw + 8, y + 1), f"{100 * float(p[k]):.0f}%", font=font(16), fill=INK)
-        return img
-
-
 def crop_px(k, size):
     W, H = size
     b = boxes()[k]
@@ -110,69 +59,91 @@ def ease(t):
     return 0.5 - 0.5 * np.cos(np.pi * t)
 
 
-def timeline(panel_list, T):
-    """Yield, per video frame, one (image, caption, belief) triple per panel."""
-    n = len(panel_list)
+class Panel:
+    """One version of the method on one clip: the footage with a corner tag and a caption strip."""
+
+    def __init__(self, name, colour, traj, frames, names, label, w, h, scale=1.0):
+        self.name, self.colour, self.t, self.frames, self.names, self.label = name, colour, traj, frames, names, label
+        self.w, self.h, self.s = w, h, scale
+
+    def prob_text(self, p):
+        top = int(np.argmax(p))
+        if top == self.label:
+            return f"{sci(self.names[top])}  {p[top]:.2f}  (true species)"
+        return f"{sci(self.names[top])}  {p[top]:.2f}    true species {sci(self.names[self.label])}  {p[self.label]:.2f}"
+
+    def render(self, st):
+        im = self.frames[st["f"]]
+        W, H = im.size
+        x0, y0, x1, y1 = st.get("win") or (0, 0, W, H)
+        v = im.crop((round(x0), round(y0), round(x1), round(y1))).resize((self.w, self.h), Image.BICUBIC).convert("RGBA")
+        over = Image.new("RGBA", v.size, (0, 0, 0, 0))
+        d = ImageDraw.Draw(over)
+        s = self.s
+        if st.get("box") is not None:
+            sx, sy = self.w / (x1 - x0), self.h / (y1 - y0)
+            b = st["box"]
+            d.rectangle([(b[0] - x0) * sx + 1, (b[1] - y0) * sy + 1, (b[2] - x0) * sx - 2, (b[3] - y0) * sy - 2],
+                        outline=self.colour + (255,), width=max(2, round(3 * s)))
+        tag = font(round(15 * s), bold=True)                                   # corner tag
+        tw = tag.getlength(self.name)
+        pad = round(8 * s)
+        d.rectangle([0, 0, tw + 3 * pad + 6 * s, round(30 * s)], fill=(0, 0, 0, 150))
+        d.rectangle([pad, round(9 * s), pad + 6 * s, round(21 * s)], fill=self.colour + (255,))
+        d.text((2 * pad + 6 * s, round(6 * s)), self.name, font=tag, fill=(255, 255, 255, 255))
+        lines = [st["step"]] + ([self.prob_text(st["p"])] if st.get("p") is not None else [])
+        f1, f2 = font(round(16 * s), bold=st.get("final", False)), font(round(15 * s))
+        strip = round((26 + 22 * (len(lines) - 1)) * s)                         # caption strip
+        d.rectangle([0, self.h - strip - pad, self.w, self.h], fill=(0, 0, 0, 160))
+        y = self.h - strip - pad // 2
+        for i, line in enumerate(lines):
+            d.text((pad + 2, y), line, font=f1 if i == 0 else f2, fill=(255, 255, 255, 255))
+            y += round(22 * s)
+        return Image.alpha_composite(v, over).convert("RGB")
+
+
+def timeline(panels, T):
+    """Per video frame, one state per panel: frame, zoom window, box, step text, belief."""
     for f in range(T):                                                  # glance at every frame
         for _ in range(3):
-            yield [(p.view(f), f"Glance: frame {f + 1} of {T}, 224 px", None) for p in panel_list]
+            yield [dict(f=f, step=f"Glance: frame {f + 1} of {T}") for _ in panels]
     for _ in range(14):
-        yield [(p.view(T - 1), f"After the glance ({T} frames)", p.t["p"][0]) for p in panel_list]
+        yield [dict(f=T - 1, step=f"After the glance ({T} frames)", p=p.t["p"][0]) for p in panels]
     for j in range(2):                                                  # two looks
-        prev, nxt = [p.t["p"][j] for p in panel_list], [p.t["p"][j + 1] for p in panel_list]
         info = []
-        for p in panel_list:
+        for p in panels:
             f, k = p.t["looks"][j]
-            info.append((f, k, crop_px(k, p.frames[f].size), p.t["entered"][j]))
+            label = f"Look {j + 1}: frame {f + 1}, crop {k}"
+            if not p.t["entered"][j]:
+                label += " (classified empty, not used)"
+            info.append((f, k, crop_px(k, p.frames[f].size), label, p.t["p"][j], p.t["p"][j + 1]))
         for _ in range(8):
-            yield [(p.view(f, box=bx), f"Look {j + 1}: frame {f + 1}, crop {k}", pv)
-                   for p, (f, k, bx, _), pv in zip(panel_list, info, prev)]
-        for s in range(10):
-            a = ease((s + 1) / 10)
+            yield [dict(f=f, box=bx, step=lab, p=pv) for f, k, bx, lab, pv, nv in info]
+        for t in range(10):
+            a = ease((t + 1) / 10)
             out = []
-            for p, (f, k, bx, _), pv in zip(panel_list, info, prev):
+            for p, (f, k, bx, lab, pv, nv) in zip(panels, info):
                 W, H = p.frames[f].size
-                win = (a * bx[0], a * bx[1], W + a * (bx[2] - W), H + a * (bx[3] - H))
-                out.append((p.view(f, window=win, box=bx), f"Look {j + 1}: frame {f + 1}, crop {k}, 2\u00d7 zoom", pv))
+                out.append(dict(f=f, win=(a * bx[0], a * bx[1], W + a * (bx[2] - W), H + a * (bx[3] - H)), box=bx,
+                                step=lab, p=pv))
             yield out
-        for s in range(12):
-            a = ease(min(1, (s + 1) / 6))
-            out = []
-            for p, (f, k, bx, ent), pv, nv in zip(panel_list, info, prev, nxt):
-                cap = f"Look {j + 1}: frame {f + 1}, crop {k}" + ("" if ent else ": classified empty, excluded from fusion")
-                out.append((p.view(f, window=bx), cap, (1 - a) * pv + a * nv))
-            yield out
+        for t in range(12):
+            a = ease(min(1, (t + 1) / 6))
+            yield [dict(f=f, win=bx, step=lab, p=(1 - a) * pv + a * nv) for f, k, bx, lab, pv, nv in info]
         for _ in range(6):
-            yield [(p.view(f, box=bx), f"Look {j + 1}: frame {f + 1}, crop {k}" + ("" if ent else ": classified empty, excluded from fusion"), nv)
-                   for p, (f, k, bx, ent), nv in zip(panel_list, info, nxt)]
-    for _ in range(24):                                                 # verdict
-        out = []
-        for p in panel_list:
-            ok = p.t["pred"] == p.label
-            out.append((p.view(p.t["looks"][-1][0]),
-                        f"Prediction: {sci(p.names[p.t['pred']])} ({'correct' if ok else 'incorrect'})", p.t["p"][2]))
-        yield out
+            yield [dict(f=f, box=bx, step=lab, p=nv) for f, k, bx, lab, pv, nv in info]
+    for _ in range(24):                                                 # result
+        yield [dict(f=p.t["looks"][-1][0], final=True, p=p.t["p"][2],
+                    step=f"Prediction: {sci(p.names[p.t['pred']])} ({'correct' if p.t['pred'] == p.label else 'incorrect'})")
+               for p in panels]
 
 
-def compose(panels, steps, title, width, height, frame_h, bars_h):
-    canvas = Image.new("RGB", (width, height), BG)
-    d = ImageDraw.Draw(canvas)
-    d.text((24, 16), title, font=font(22, "b"), fill=INK)
-    gap = 28
-    pw = panels[0].w
-    for i, (p, (view, caption, belief)) in enumerate(zip(panels, steps)):
-        x = 24 + i * (pw + gap)
-        y = 56
-        d.text((x, y), p.name, font=font(18, "b"), fill=p.colour)
-        d.line([(x, y + 26), (x + pw, y + 26)], fill=p.colour, width=3)
-        canvas.paste(view, (x, y + 34))
-        cap_col = INK
-        if caption.endswith("(correct)"):
-            cap_col = GREEN
-        elif caption.endswith("(incorrect)"):
-            cap_col = RED
-        d.text((x, y + 42 + frame_h), caption, font=font(17, "b" if cap_col != INK else ""), fill=cap_col)
-        canvas.paste(p.bars(belief), (x, y + 76 + frame_h))
+def compose(panels, states, gap=6):
+    """Panels side by side on black."""
+    w, h = panels[0].w, panels[0].h
+    canvas = Image.new("RGB", (len(panels) * w + (len(panels) - 1) * gap, h), (0, 0, 0))
+    for i, (p, st) in enumerate(zip(panels, states)):
+        canvas.paste(p.render(st), (i * (w + gap), 0))
     return canvas
 
 
@@ -231,41 +202,30 @@ def main():
         order = {cid: i for i, cid in enumerate(args.clips.split(","))}
         done = sorted((d for d in done if d[0] in order), key=lambda d: order[d[0]])
 
-    frame_h, bars_h, pw = 340, 132, 604
+    pw, ph = 640, 360
     made = []
     for cid, ca, cb, ta, tb in done[: args.compare]:
         frames = load_clip_frames(frames_df, cid, root)
         truth = names_b[cb.label]
-        pa = Panel("Method as proposed", ORANGE, ta, frames, names_a, ca.label, pw, frame_h, bars_h)
-        pb = Panel("Final method", BLUE, tb, frames, names_b, cb.label, pw, frame_h, bars_h)
-        size = (24 * 2 + 2 * pw + 28, 56 + 76 + frame_h + bars_h + 18)
-        size = (size[0] + size[0] % 2, size[1] + size[1] % 2)
-        steps = timeline([pa, pb], len(frames))
-        imgs = (compose([pa, pb], s, f"iWildCam test clip ({len(frames)} frames, unseen camera). True species: {sci(truth)}",
-                        size[0], size[1], frame_h, bars_h)
-                for s in steps)
-        poster = write_mp4(imgs, size, out / f"compare_{cid}.mp4")
-        poster.save(out / f"compare_{cid}.jpg", quality=85)
+        pa = Panel("As proposed", ORANGE, ta, frames, names_a, ca.label, pw, ph)
+        pb = Panel("Final", BLUE, tb, frames, names_b, cb.label, pw, ph)
+        size = (2 * pw + 6, ph)
+        poster = write_mp4((compose([pa, pb], st) for st in timeline([pa, pb], len(frames))), size,
+                           out / f"compare_{cid}.mp4")
+        poster.save(out / f"compare_{cid}.jpg", quality=88)
         print("wrote", out / f"compare_{cid}.mp4")
         made.append(f"compare_{cid}.mp4\t{sci(truth)}\t{len(frames)}")
     (out / "videos.txt").write_text("\n".join(made) + "\n")         # file, species, frames: the page shows these, in order
 
-    # teaser: the final method alone, a few clips one after another, larger
-    tw, th_frame, th_bars = 900, 506, 150
-    size = (24 * 2 + tw, 56 + 76 + th_frame + th_bars + 18)
-    size = (size[0] + size[0] % 2, size[1] + size[1] % 2)
-
-    def teaser_frames():
+    def teaser_frames():                                            # the final method alone, larger
         for cid, ca, cb, ta, tb in done[: args.teaser]:
             frames = load_clip_frames(frames_df, cid, root)
-            pb = Panel("Final method, DINOv2: glance at every frame, then two looks selected by EIG",
-                       BLUE, tb, frames, names_b, cb.label, tw, th_frame, th_bars)
-            for s in timeline([pb], len(frames)):
-                yield compose([pb], s, f"iWildCam test clip ({len(frames)} frames, unseen camera). True species: "
-                              f"{sci(names_b[cb.label])}", size[0], size[1], th_frame, th_bars)
+            pb = Panel("Final method (DINOv2)", BLUE, tb, frames, names_b, cb.label, 1280, 720, scale=1.6)
+            for st in timeline([pb], len(frames)):
+                yield compose([pb], st)
 
-    poster = write_mp4(teaser_frames(), size, out / "teaser.mp4")
-    poster.save(out / "teaser.jpg", quality=85)
+    poster = write_mp4(teaser_frames(), (1280, 720), out / "teaser.mp4")
+    poster.save(out / "teaser.jpg", quality=88)
     print("wrote", out / "teaser.mp4")
 
 

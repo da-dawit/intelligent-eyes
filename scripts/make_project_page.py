@@ -35,7 +35,7 @@ plt.rcParams.update({
     "font.size": 12, "axes.labelsize": 12, "xtick.labelsize": 11, "ytick.labelsize": 11, "legend.fontsize": 11,
     "axes.linewidth": 0.8, "xtick.direction": "in", "ytick.direction": "in", "xtick.top": True, "ytick.right": True,
     "lines.linewidth": 1.6, "lines.markersize": 5, "legend.frameon": False, "savefig.bbox": "tight",
-    "savefig.pad_inches": 0.03})
+    "savefig.pad_inches": 0.04})
 
 
 # ------------------------------------------------------------------ numbers
@@ -100,15 +100,16 @@ def look_hits(frames, encoder="dinov2"):
 
 
 # ------------------------------------------------------------------ figures
-def sublabel(ax, text, y=-0.2):
-    ax.text(0.5, y, text, transform=ax.transAxes, ha="center", va="top", fontsize=12)
+def letter(ax, ch, x=-0.02, y=1.0):
+    """Bold panel letter in the top-left corner, outside the axes (as in journal figures)."""
+    ax.text(x, y, ch, transform=ax.transAxes, ha="right", va="bottom", fontsize=14, fontweight="bold")
 
 
 def fig_curves(data, out):
     """Accuracy against the number of looks; mean and standard deviation over the 3 seeds."""
-    fig, axes = plt.subplots(1, 4, figsize=(10, 2.6))
+    fig, axes = plt.subplots(1, 4, figsize=(10, 2.55), layout="constrained")
     x = np.arange(5)
-    for i, (ax, (enc, _)) in enumerate(zip(axes, ENCODERS)):
+    for ax, (enc, _) in zip(axes, ENCODERS):
         d = data[enc]
         for ys, col, mk, lab in ((d["first"]["curve"], C_FIRST, "D", "as proposed"),
                                  (d["final"]["random_curve"], C_RANDOM, "s", "random looks"),
@@ -119,48 +120,45 @@ def fig_curves(data, out):
         ax.axhline(d["final"]["all9"], color=C_REF, ls="--", lw=1, label="all crops ($10T$ passes)")
         ax.set_xticks(x)
         ax.set_xlabel("looks per clip")
-        sublabel(ax, f"({'abcd'[i]}) {d['name']}", y=-0.34)
+        ax.set_title(d["name"], fontsize=12)
     axes[0].set_ylabel("accuracy (%)")
     h, l = axes[0].get_legend_handles_labels()
-    fig.legend(h, l, loc="upper center", ncol=4, bbox_to_anchor=(0.5, 1.1))
-    fig.tight_layout(w_pad=1.2)
+    fig.legend(h, l, loc="outside upper center", ncol=4)
     fig.savefig(out, dpi=200)
     plt.close(fig)
 
 
 def fig_diagnosis(hits, out):
-    """(a) the crop classifier alone (scripts/diagnose_crops.py, DINOv2 seed 0); (b) where 2 looks land."""
-    fig, (a, b) = plt.subplots(1, 2, figsize=(10, 2.7), gridspec_kw={"width_ratios": [1, 1.6]})
+    """a: the crop classifier alone (scripts/diagnose_crops.py, DINOv2 seed 0); b: where 2 looks land."""
+    fig, (a, b) = plt.subplots(1, 2, figsize=(10, 2.5), layout="constrained", gridspec_kw={"width_ratios": [1, 1.7]})
     a.bar([0, 1], [42.9, 85.5], width=0.55, color=[C_FIRST, C_FINAL])
     a.axhline(62.5, color=C_REF, ls="--", lw=1, label="glance, whole frame")
     a.legend(loc="upper left")
     a.set_xticks([0, 1])
     a.set_xticklabels(["clip labels", "empty class"])
     a.set_xlim(-0.6, 1.6)
-    a.set_ylim(0, 110)
+    a.set_ylim(0, 112)
     a.set_yticks([0, 20, 40, 60, 80, 100])
-    a.set_ylabel("top-1 on animal crops (%)")
-    sublabel(a, "(a) crop classifier", y=-0.27)
+    a.set_ylabel("top-1, animal crops (%)")
+    letter(a, "a", x=-0.2)
     names = ["random", "proposed", "motion", "attention", "final"]
     vals = [hits["random"], hits["eig_first"], hits["motion"], hits["attention"], hits["eig_final"]]
-    cols = [C_RANDOM, C_FIRST, C_BASE, C_BASE, C_FINAL]
-    b.bar(np.arange(5), vals, width=0.6, color=cols)
+    b.bar(np.arange(5), vals, width=0.6, color=[C_RANDOM, C_FIRST, C_BASE, C_BASE, C_FINAL])
     b.axhline(hits["chance"], color=C_REF, ls="--", lw=1, label="chance")
     b.legend(loc="upper left")
     b.set_xticks(np.arange(5))
     b.set_xticklabels(names)
     b.set_xlim(-0.6, 4.6)
-    b.set_ylim(0, 110)
+    b.set_ylim(0, 112)
     b.set_yticks([0, 20, 40, 60, 80, 100])
     b.set_ylabel("looks on the animal (%)")
-    sublabel(b, "(b) where two looks land", y=-0.27)
-    fig.tight_layout(w_pad=3)
+    letter(b, "b", x=-0.12)
     fig.savefig(out, dpi=200)
     plt.close(fig)
 
 
 def fig_method(dump, frames, out, clip_id=None):
-    """(a) the glance frames, (b) P(animal) per crop, (c) the selected crop at 2x, (d) the posterior."""
+    """a: the glance frames, b: P(animal) per crop, c: the selected crop at 2x, d: the posterior."""
     D = pickle.load(open(dump, "rb"))
     cats = pd.read_csv(paths.DATA / "raw" / "iwildcam_v2.0" / "categories.csv")
     name_of = dict(zip(cats["y"], cats["name"]))
@@ -173,38 +171,36 @@ def fig_method(dump, frames, out, clip_id=None):
     f1, k1 = o2.looks[0]
     W, H = imgs[f1].size
 
-    fig = plt.figure(figsize=(10, 2.5))
-    gs = fig.add_gridspec(1, 4, width_ratios=[0.6, 0.62, 1.05, 1.45], wspace=0.25, left=0.01, right=0.99,
-                          bottom=0.2, top=0.98)
-    caps = [f"(a) {len(imgs)} frames, 224 px", "(b) $P$(animal) per crop", f"(c) crop {k1}, frame {f1 + 1}, 2$\\times$",
-            "(d) posterior over species"]
-    for i, cap in enumerate(caps):
-        box = gs[i].get_position(fig)
-        fig.text((box.x0 + box.x1) / 2, 0.03, cap, ha="center", va="bottom", fontsize=12)
-    sub = gs[0].subgridspec(min(len(imgs), 3), 1, hspace=0.06)          # (a) the frames
+    fig = plt.figure(figsize=(10, 2.15))
+    gs = fig.add_gridspec(1, 5, width_ratios=[0.52, 0.5, 0.95, 0.62, 0.78], wspace=0.12,
+                          left=0.03, right=0.995, bottom=0.12, top=0.88)
+    sub = gs[0].subgridspec(min(len(imgs), 3), 1, hspace=0.05)          # a: the frames
     for i, im in enumerate(imgs[:3]):
         ax = fig.add_subplot(sub[i])
         ax.imshow(np.asarray(im.resize((256, 144))))
         ax.set_xticks([])
         ax.set_yticks([])
-    ax = fig.add_subplot(gs[1])                                          # (b) P(animal), 3 x 3 crop offsets
+        if i == 0:
+            letter(ax, "a", x=-0.04, y=1.02)
+    ax = fig.add_subplot(gs[1])                                          # b: P(animal), 3 x 3 crop offsets
     pa = c.p_animal[f1].reshape(3, 3)
     ax.imshow(pa, cmap="Blues", vmin=0, vmax=1)
     for r in range(3):
         for q in range(3):
-            ax.text(q, r, f"{pa[r, q]:.2f}", ha="center", va="center", fontsize=10,
+            ax.text(q, r, f"{pa[r, q]:.2f}", ha="center", va="center", fontsize=9.5,
                     color="white" if pa[r, q] > 0.6 else "black")
     r1, q1 = divmod(k1 - 1, 3)
     ax.add_patch(plt.Rectangle((q1 - 0.5, r1 - 0.5), 1, 1, fill=False, ec="black", lw=2))
     ax.set_xticks([])
     ax.set_yticks([])
-    ax = fig.add_subplot(gs[2])                                          # (c) the selected crop at 2x
+    letter(ax, "b", x=-0.04, y=1.02)
+    ax = fig.add_subplot(gs[2])                                          # c: the selected crop at 2x
     b = boxes()[k1]
     ax.imshow(np.asarray(imgs[f1].crop((b[0] * W, b[1] * H, b[2] * W, b[3] * H))))
     ax.set_xticks([])
     ax.set_yticks([])
-    inner = gs[3].subgridspec(1, 2, width_ratios=[0.85, 1], wspace=0.02)  # (d) names | bars
-    ax = fig.add_subplot(inner[1])
+    letter(ax, "c", x=-0.02, y=1.02)
+    ax = fig.add_subplot(gs[4])                                          # d: posterior (names in gs[3])
     top = list(np.argsort(-o2.p)[:3])[::-1]
     y = np.arange(len(top))
     ax.barh(y + 0.19, [o0.p[k] for k in top], height=0.36, color=C_BASE, label="glance")
@@ -217,7 +213,9 @@ def fig_method(dump, frames, out, clip_id=None):
     ax.tick_params(axis="y", left=False, right=False)
     ax.set_xlim(0, 1)
     ax.set_xticks([0, 0.5, 1])
-    ax.legend(loc="lower right", fontsize=10)
+    ax.legend(loc="lower right", fontsize=9.5)
+    box = gs[3].get_position(fig)
+    fig.text(box.x0 + 0.005, 0.88, "d", ha="left", va="bottom", fontsize=14, fontweight="bold")
     fig.savefig(out, dpi=200, bbox_inches=None)
     plt.close(fig)
 
