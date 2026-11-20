@@ -48,7 +48,8 @@ uv pip install --python .venv/bin/python -e ".[dev]"
 ```
 
 Data lives outside the repo, in `../data` by default (set `EYES_DATA` to move it).
-Hardware used: Apple M5 Pro (MPS), 51 GB RAM.
+Hardware used: development on an Apple M5 Pro (MPS); the full runs on one rented RTX PRO 6000
+(Blackwell, 96 GB) with [scripts/cloud_run.sh](scripts/cloud_run.sh).
 
 ## Pipeline
 
@@ -66,13 +67,11 @@ tar xzf $EYES_DATA/raw/iwildcam_v2.0.tar.gz -C $EYES_DATA/raw/iwildcam_v2.0
 python scripts/build_clips.py --dataset iwildcam --root $EYES_DATA/raw/iwildcam_v2.0 \
     --out $EYES_DATA/processed/iwildcam
 
-# 2. encode every frame once: glance, 9 crops, crop previews (resumable)
+# 2. encode every frame once: glance, 9 crops, crop previews, CLS attention, and (--hires)
+#    the whole frame at 2x for baseline B1. Each frame is decoded once for all encoders listed.
 python scripts/cache_features.py --frames $EYES_DATA/processed/iwildcam/frames.csv \
-    --images $EYES_DATA/raw/iwildcam_v2.0 --encoder dinov2 --out $EYES_DATA/features/iwildcam/dinov2
-
-#    optional, baseline B1: the whole frame at 2x resolution, in its own folder
-python scripts/cache_features.py --frames $EYES_DATA/processed/iwildcam/frames.csv \
-    --images $EYES_DATA/raw/iwildcam_v2.0 --encoder dinov2 --hires --out $EYES_DATA/features/iwildcam/dinov2_hr
+    --images $EYES_DATA/raw/iwildcam_v2.0 --encoders dinov2 clip siglip2 dinov3 --hires \
+    --out-root $EYES_DATA/features/iwildcam
 
 # 3. fit on 10% held-out training cameras, run every method on the test clips, 3 seeds
 python scripts/run_eval.py --dataset iwildcam --encoder dinov2 --seeds 0 1 2

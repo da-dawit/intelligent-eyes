@@ -17,8 +17,14 @@ THUMB = 48   # grayscale thumbnail kept for the motion baseline (B4)
 
 
 def load_frame(path: str) -> tuple[np.ndarray, np.ndarray]:
-    """Read an image -> (448x448x3 uint8 frame, 48x48 uint8 grayscale thumbnail)."""
+    """Read an image -> (448x448x3 uint8 frame, 48x48 uint8 grayscale thumbnail).
+
+    Large JPEGs (DDR photos are 2-4k px) are decoded directly at 1/2, 1/4 or 1/8 scale
+    (libjpeg 'draft' mode), never below 448 px on either side, before the final resize.
+    iWildCam frames are already 448 px tall, so they are decoded in full.
+    """
     with Image.open(path) as im:
+        im.draft("RGB", (BASE, BASE))
         im = im.convert("RGB")
         frame = im.resize((BASE, BASE), Image.BICUBIC)
     thumb = frame.convert("L").resize((THUMB, THUMB), Image.BILINEAR)
