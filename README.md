@@ -88,6 +88,15 @@ count about as much as one more frame). Extra looks now never hurt.
 `P(animal)` comes from a linear classifier on the glance's own tokens over the crop (AUC 0.97–0.98
 on test cameras, better than pixel motion at 0.82 or CLS attention at 0.61–0.94).
 
+**6. The look predictor starts from a guess.** Eq. (2) now also takes, as an input, the vote that
+a linear classifier on the glance's own tokens over the crop guesses for that crop (the same species +
+*empty* labels as change 2), so the ridge regression only has to correct that guess
+([scripts/run_eval.py: predictor_inputs](scripts/run_eval.py)).
+
+**7. Conditioning on looks only.** Prop. 5.1 conditions the predicted votes on the looks already
+taken, not on the glances: the predictor already sees the glance, so conditioning on it again would
+count it twice ([eyes/predictor.py: condition_on_looks](eyes/predictor.py)).
+
 **A bug found on the way.** In float16 the eager attention pass turned every DINOv3 attention map
 into NaN, which silently broke its B3 baseline; attention now runs in float32
 ([eyes/encoders.py](eyes/encoders.py), repaired caches with [scripts/fix_attention.py](scripts/fix_attention.py)).
@@ -101,7 +110,12 @@ uv pip install --python .venv/bin/python -e ".[dev]"
 PYTHONPATH=. .venv/bin/python scripts/synthetic_study.py    # the method on synthetic clips
 ```
 
-Neither needs any data. The summaries, fitted parameters, rankings and figures of every run are in
+Dependencies (installed by the second line, from `pyproject.toml`): Python 3.11, PyTorch ≥ 2.5,
+torchvision, Transformers ≥ 4.56, safetensors, NumPy, SciPy, pandas, scikit-learn, Pillow,
+Matplotlib, tqdm; pytest for the tests. Optional: ffmpeg (project page videos); a CUDA GPU or
+Apple MPS for encoding.
+
+The tests and the synthetic study need no data. The summaries, fitted parameters, rankings and figures of every run are in
 `results/`; the per-clip outputs behind them (`clips.csv.gz`, about 15 MB per run) are kept out of git
 and are rebuilt by `run_eval.py`.
 
