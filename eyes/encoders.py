@@ -66,15 +66,16 @@ class FrozenEncoder(torch.nn.Module):
 
         For baseline B3 ("look where the model attends"). Attention maps are only returned by
         the slower 'eager' implementation, so a second eager copy runs on glances only.
-        SigLIP 2 has no CLS token and is not supported.
+        That copy runs in float32: DINOv3's large activations overflow the eager attention
+        in float16 and every map comes out NaN. SigLIP 2 has no CLS token and is not supported.
         """
         if self.name == "siglip2":
             raise ValueError("SigLIP 2 has no CLS token")
         if not hasattr(self, "_eager"):
             from transformers import AutoModel
-            m = AutoModel.from_pretrained(self.spec.hf_name, dtype=self.dtype, attn_implementation="eager")
+            m = AutoModel.from_pretrained(self.spec.hf_name, dtype=torch.float32, attn_implementation="eager")
             self._eager = getattr(m, "vision_model", m).to(self.device).eval()
-        x = ((x - self.mean) / self.std).to(self.dtype)
+        x = ((x - self.mean) / self.std).float()
         att = self._eager(pixel_values=x, output_attentions=True).attentions[-1]   # (B, heads, L, L)
         n = self.grid
         return att[:, :, 0, -n * n:].mean(dim=1).float().reshape(x.shape[0], n, n)
