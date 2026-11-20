@@ -1,0 +1,19 @@
+[project]
+name = "intelligent-eyes"
+version = "0.1.0"
+description = "Teaching frozen ViT encoders where (and when) to look in video, by expected information gain."
+requires-python = ">=3.11"
+dependencies = [
+    "numpy", "scipy", "scikit-learn", "pandas", "pillow", "matplotlib", "tqdm",
+    "torch>=2.5", "torchvision", "transformers>=4.56", "safetensors",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.setuptools]
+packages = ["eyes"]
