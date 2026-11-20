@@ -10,6 +10,8 @@ most. Nothing is trained except linear classifiers and a ridge regression; the e
 
 - Proposal: [docs/proposal.pdf](docs/proposal.pdf)
 - Every equation, derived step by step: [docs/derivations.pdf](docs/derivations.pdf)
+- Project page with the results and side-by-side examples (open in a browser, works offline):
+  [docs/project_page/index.html](docs/project_page/index.html), rebuilt by `scripts/make_project_page.py`
 
 ## How the code maps to the mathematics
 
@@ -94,7 +96,12 @@ into NaN, which silently broke its B3 baseline; attention now runs in float32
 uv venv --python 3.11 .venv
 uv pip install --python .venv/bin/python -e ".[dev]"
 .venv/bin/python -m pytest          # 43 tests: derivations, new pieces, controller on synthetic clips
+PYTHONPATH=. .venv/bin/python scripts/synthetic_study.py    # the method on synthetic clips
 ```
+
+Neither needs any data. The summaries, fitted parameters, rankings and figures of every run are in
+`results/`; the per-clip outputs behind them (`clips.csv.gz`, about 15 MB per run) are kept out of git
+and are rebuilt by `run_eval.py`.
 
 Data lives outside the repo, in `../data` by default (set `EYES_DATA` to move it).
 Hardware used: development on an Apple M5 Pro (MPS); the full runs on one rented RTX PRO 6000
