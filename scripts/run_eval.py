@@ -22,6 +22,7 @@ import pandas as pd
 
 from eyes import paths
 from eyes.belief import scores, softmax
+from eyes.boxes import crop_labels, load_detections, mixture_votes
 from eyes.cache import load_features
 from eyes.classifier import fit_temperature, train_probe
 from eyes.controller import Clip, Model, run
@@ -49,20 +50,37 @@ def heldout_cameras(train: pd.DataFrame, frac: float, rng) -> set:
     return set(held)
 
 
-def votes_for(rows, feats, probe_g, probe_c, log_prior):
-    """(N, 10, K) votes: glance then the 9 crops, l = log q - log pi."""
+def votes_for(rows, feats, probe_g, probe_c, log_prior, log_pi_crop=None):
+    """(N, 10, K) votes: glance then the 9 crops, l = log q - log pi.
+
+    If the crop classifier has an extra 'empty' class (log_pi_crop given), crop votes are
+    the mixture votes log(q(y|c)/pi(y) + q(empty|c)) of eyes/boxes.py.
+    """
     N = len(rows)
     D = feats["g"].shape[1]
-    lg = probe_g.log_probs(feats["g"][rows])
+    lg = probe_g.log_probs(feats["g"][rows]) - log_prior
     lc = probe_c.log_probs(feats["crops"][rows].reshape(-1, D)).reshape(N, 9, -1)
-    return (np.concatenate([lg[:, None], lc], axis=1) - log_prior).astype(np.float32)
+    lc = mixture_votes(lc, log_pi_crop) if log_pi_crop is not None else lc - log_prior
+    return np.concatenate([lg[:, None], lc], axis=1).astype(np.float32)
 
 
-def predictor_inputs(rows, feats):
-    """[u_bar_fk ; g_f] for the 9 crops of each frame -> (N * 9, 2D)."""
+def predictor_inputs(rows, feats, preview=None):
+    """[u_bar_fk ; g_f] for the 9 crops of each frame -> (N * 9, 2D).
+
+    preview: optional (probe_u, log_pi_crop). probe_u classifies a crop's preview u_bar_fk
+    (the glance's own tokens over that crop) as species or 'empty', trained on the same box
+    labels as the crop classifier; its mixture vote -- the look's vote as guessed from the
+    glance alone -- is appended, so the ridge of eq. (2) only has to correct it.
+    """
     u = feats["ubar"][rows].astype(np.float32)
     g = np.repeat(feats["g"][rows].astype(np.float32)[:, None], 9, axis=1)
-    return np.concatenate([u, g], axis=2).reshape(-1, 2 * u.shape[2])
+    parts = [u, g]
+    N, D = u.shape[0], u.shape[2]
+    if preview is not None:
+        probe_u, log_pi_crop = preview
+        lq = probe_u.log_probs(u.reshape(-1, D)).reshape(N, 9, -1)
+        parts.append(mixture_votes(lq, log_pi_crop).astype(np.float32))
+    return np.concatenate(parts, axis=2).reshape(N * 9, -1)
 
 
 def build_clips(df, votes, mu, thumbs, attn=None):
@@ -82,7 +100,17 @@ def build_clips(df, votes, mu, thumbs, attn=None):
     return clips
 
 
-def run_seed(frames, feats, hires, seed, out_dir, args):
+def crop_training_labels(df, content, K):
+    """(N*9,) crop labels: species index if the crop holds the animal, K if empty, -1 unusable.
+
+    content is indexed by the frame's original row number (frames.csv `row`).
+    """
+    c = content[df["row"].values]
+    lab = np.where(c == 1, df["label"].values[:, None], np.where(c == 0, K, -1))
+    return lab.reshape(-1)
+
+
+def run_seed(frames, feats, hires, seed, out_dir, args, content=None):
     t0 = time.time()
     rng = np.random.default_rng(seed)
     ok_clip = frames.groupby("clip_id")["ok"].transform("all")
@@ -106,24 +134,41 @@ def run_seed(frames, feats, hires, seed, out_dir, args):
     D = feats["g"].shape[1]
     probe_g = train_probe(feats["g"][fit_df["row"].values].astype(np.float32), fit_df["label"].values, K, seed=seed)
     Xc = feats["crops"][fit_df["row"].values].reshape(-1, D)
-    yc = np.repeat(fit_df["label"].values, 9)
-    if len(Xc) > args.max_crop_rows:
-        pick = rng.choice(len(Xc), args.max_crop_rows, replace=False)
-        Xc, yc = Xc[pick], yc[pick]
-    probe_c = train_probe(Xc.astype(np.float32), yc, K, seed=seed)
+    if content is None:                                     # every crop gets the clip's species
+        yc, n_out, log_pi_crop = np.repeat(fit_df["label"].values, 9), K, None
+        use = np.arange(len(yc))
+    else:                                                   # species if the crop holds the animal, else 'empty'
+        yc, n_out = crop_training_labels(fit_df, content, K), K + 1
+        use = np.flatnonzero(yc >= 0)
+        animal = np.bincount(yc[use][yc[use] < K], minlength=K) + 1.0
+        log_pi_crop = np.log(animal / animal.sum())
+    if len(use) > args.max_crop_rows:
+        use = rng.choice(use, args.max_crop_rows, replace=False)
+    probe_c = train_probe(Xc[use].astype(np.float32), yc[use], n_out, seed=seed)
 
     # ---- temperatures on held-out cameras (A3)
     hr = held_df["row"].values
     hy = held_df["label"].values
     probe_g.temperature = fit_temperature(probe_g.logits(feats["g"][hr]), hy)
     lc_h = probe_c.logits(feats["crops"][hr].reshape(-1, D))
-    probe_c.temperature = fit_temperature(lc_h, np.repeat(hy, 9))
+    yh_c = np.repeat(hy, 9) if content is None else crop_training_labels(held_df, content, K)
+    ok_c = yh_c >= 0
+    probe_c.temperature = fit_temperature(lc_h[ok_c], yh_c[ok_c])
     acc_g = float(np.mean(probe_g.logits(feats["g"][hr]).argmax(1) == hy))
-    acc_c = float(np.mean(lc_h.argmax(1) == np.repeat(hy, 9)))
+    acc_c = float(np.mean(lc_h[ok_c].argmax(1) == yh_c[ok_c]))
 
     # ---- votes, look predictor (eq. 2) on held-out
-    votes_h = votes_for(hr, feats, probe_g, probe_c, log_prior)
-    Xh = predictor_inputs(hr, feats)
+    votes_h = votes_for(hr, feats, probe_g, probe_c, log_prior, log_pi_crop)
+    preview = None
+    if args.predictor == "preview":
+        if content is None:
+            raise SystemExit("--predictor preview needs --crop-labels boxes")
+        Xu = feats["ubar"][fit_df["row"].values].reshape(-1, D)
+        probe_u = train_probe(Xu[use].astype(np.float32), yc[use], K + 1, seed=seed)
+        lu_h = probe_u.logits(feats["ubar"][hr].reshape(-1, D))
+        probe_u.temperature = fit_temperature(lu_h[ok_c], yh_c[ok_c])
+        preview = (probe_u, log_pi_crop)
+    Xh = predictor_inputs(hr, feats, preview)
     Yh = votes_h[:, 1:].reshape(-1, K)
     groups = np.repeat(held_df["camera"].values, 9)
     pred = fit_ridge(Xh, Yh, groups, seed=seed)
@@ -156,9 +201,9 @@ def run_seed(frames, feats, hires, seed, out_dir, args):
 
     # ---- test clips
     tr = test_df["row"].values
-    votes_t = votes_for(tr, feats, probe_g, probe_c, log_prior)
+    votes_t = votes_for(tr, feats, probe_g, probe_c, log_prior, log_pi_crop)
     mu_t = np.zeros_like(votes_t)
-    mu_t[:, 1:] = pred.predict(predictor_inputs(tr, feats)).reshape(len(tr), 9, K)
+    mu_t[:, 1:] = pred.predict(predictor_inputs(tr, feats, preview)).reshape(len(tr), 9, K)
     test_df = test_df.reset_index(drop=True)
     clips = build_clips(test_df, votes_t, mu_t, feats["thumb"][tr], feats["attn"][tr] if "attn" in feats else None)
 
@@ -246,6 +291,10 @@ def main():
     ap.add_argument("--heldout-frac", type=float, default=0.10)
     ap.add_argument("--max-crop-rows", type=int, default=300_000)
     ap.add_argument("--ranking-clips", type=int, default=1000)
+    ap.add_argument("--crop-labels", choices=["clip", "boxes"], default="clip")
+    ap.add_argument("--predictor", choices=["ridge", "preview"], default="ridge",
+                    help="preview: add the glance-preview classifier's guess of the vote to eq. (2)")
+    ap.add_argument("--md", default=str(paths.DATA / "raw" / "iwildcam_mdv4" / "iwildcam2022_mdv4_detections.json"))
     args = ap.parse_args()
 
     frames = pd.read_csv(paths.processed(args.dataset) / "frames.csv")
@@ -259,8 +308,14 @@ def main():
         frames["ok"] &= h["ok"].astype(bool)
     print(f"{args.dataset}/{args.encoder}: {len(frames)} frames, {frames['clip_id'].nunique()} clips, "
           f"{(~frames['ok']).sum()} unreadable frames, high-res B1: {'yes' if hires is not None else 'no'}")
+    content, tag = None, args.encoder
+    if args.crop_labels == "boxes":
+        content = crop_labels(frames, load_detections(args.md))
+        tag = f"{args.encoder}-boxes" + ("-preview" if args.predictor == "preview" else "")
+        print(f"crop labels from boxes: {np.mean(content == 1):.1%} animal, {np.mean(content == 0):.1%} empty, "
+              f"{np.mean(content == -1):.1%} unusable")
     for seed in args.seeds:
-        run_seed(frames, feats, hires, seed, paths.RESULTS / args.dataset / args.encoder / f"seed{seed}", args)
+        run_seed(frames, feats, hires, seed, paths.RESULTS / args.dataset / tag / f"seed{seed}", args, content)
 
 
 if __name__ == "__main__":
