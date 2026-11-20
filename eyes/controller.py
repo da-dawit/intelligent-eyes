@@ -50,11 +50,12 @@ class Model:
     log_prior: np.ndarray             # (K,) log pi(y)
     sigma2: float                     # prediction error variance of eq. (2)
     ridge: float = 1e-6
+    tau: float = 0.0                  # error shared by all crop votes of a clip (clip_correlation)
     _R_cache: dict = field(default_factory=dict, repr=False)
 
     def R(self, T: int) -> np.ndarray:
         if T not in self._R_cache:
-            self._R_cache[T] = clip_correlation(T, self.A, self.rho)
+            self._R_cache[T] = clip_correlation(T, self.A, self.rho, self.tau)
         return self._R_cache[T]
 
     @staticmethod
@@ -106,7 +107,7 @@ def candidate_terms(clip: Clip, model: Model, S: list[int], L: list[int], C: lis
     R_SS = R[np.ix_(S, S)]
     s = scores(votes[S], R_SS, model.log_prior, model.ridge)
 
-    a, _, c = add_one_look_terms(R_SS, R[np.ix_(S, C)], model.ridge)       # Prop. 4.1
+    a, _, c = add_one_look_terms(R_SS, R[np.ix_(S, C)], model.ridge, np.diag(R)[C])  # Prop. 4.1
     implied = a.T @ votes[S]                                               # (C, K)
     mu_c, var_c = condition_on_looks(mu[C], model.sigma2, R[np.ix_(L, C)], R[np.ix_(L, L)],
                                      votes[L], mu[L], model.ridge)         # Prop. 5.1

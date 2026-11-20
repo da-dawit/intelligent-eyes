@@ -27,7 +27,7 @@ from eyes.cache import load_features
 from eyes.classifier import fit_temperature, train_probe
 from eyes.controller import Clip, Model, run
 from eyes.correlation import class_conditional_residuals, fit_A, fit_rho, frame_correlation, shrink
-from eyes.fit import choose_eps, choose_shrinkage
+from eyes.fit import choose_R, choose_eps, choose_shrinkage
 from eyes.geometry import overlap_correlation
 from eyes.metrics import spearman
 from eyes.pairs import pair_report
@@ -296,7 +296,10 @@ def run_seed(frames, feats, hires, seed, out_dir, args, content=None):
     held_clips = build_clips(held_df, votes_h, mu_h, feats["thumb"][hr], branch=branch_h, gate=gate_h)
     lam, nll_table = choose_shrinkage(held_clips, A_fit, rho, log_prior, pred.sigma2, seed=seed)
     lam_ov, nll_ov = choose_shrinkage(held_clips, overlap_correlation(), rho, log_prior, pred.sigma2, seed=seed)
-    model = Model(shrink(A_fit, lam), rho, log_prior, pred.sigma2)
+    tau, tau_table = 0.0, {}
+    if args.crop_effect == "fit":                      # shared crop error, fitted with lam
+        lam, tau, tau_table = choose_R(held_clips, A_fit, rho, log_prior, pred.sigma2, seed=seed)
+    model = Model(shrink(A_fit, lam), rho, log_prior, pred.sigma2, tau=tau)
     models = {"R": model, "I": Model.independent(log_prior, pred.sigma2),
               "overlap": Model(shrink(overlap_correlation(), lam_ov), rho, log_prior, pred.sigma2)}
     eps, eps_table = choose_eps(held_clips, model, budget=max(BUDGETS), seed=seed)
@@ -398,7 +401,7 @@ def run_seed(frames, feats, hires, seed, out_dir, args, content=None):
                rho=rho, rho_lag_corr=list(map(float, c_hat)), A_fit=A_fit.round(4).tolist(),
                shrink_lambda=lam, shrink_nll=nll_table, overlap_shrink_lambda=lam_ov, overlap_shrink_nll=nll_ov,
                eps=eps, eps_table={str(k): v for k, v in eps_table.items()}, seconds=time.time() - t0)
-    fit.update(vote_shape=dict(eps=shape[0], gain=shape[1]), vote_shape_nll=shape_table)
+    fit.update(vote_shape=dict(eps=shape[0], gain=shape[1]), vote_shape_nll=shape_table, tau=tau, tau_nll=tau_table)
     if hires is not None:
         fit.update(hires_probe_heldout_acc=acc_h, T_hires=probe_h.temperature, rho_hires=rho_h)
     (out_dir / "fit.json").write_text(json.dumps(fit, indent=2, default=float))
@@ -414,6 +417,8 @@ def main():
     ap.add_argument("--max-crop-rows", type=int, default=300_000)
     ap.add_argument("--ranking-clips", type=int, default=1000)
     ap.add_argument("--crop-labels", choices=["clip", "boxes"], default="clip")
+    ap.add_argument("--crop-effect", choices=["none", "fit"], default="none",
+                    help="fit: add an error shared by all crop votes of a clip to R (tau, fitted with lam)")
     ap.add_argument("--fusion", choices=["all", "gated"], default="all",
                     help="gated: a look enters eq. (1) only if its own crop classifier says it shows the animal")
     ap.add_argument("--vote-shape", choices=["fit", "none"], default="fit",
@@ -439,7 +444,7 @@ def main():
     if args.crop_labels == "boxes":
         content = crop_labels(frames, load_detections(args.md))
         tag = (f"{args.encoder}-boxes" + {"ridge": "", "preview": "-preview", "preview_where": "-where"}[args.predictor]
-               + ("-shaped" if args.vote_shape == "fit" else "") + ("-gated" if args.fusion == "gated" else ""))
+               + ("-shaped" if args.vote_shape == "fit" else "") + ("-gated" if args.fusion == "gated" else "") + ("-tau" if args.crop_effect == "fit" else ""))
         print(f"crop labels from boxes: {np.mean(content == 1):.1%} animal, {np.mean(content == 0):.1%} empty, "
               f"{np.mean(content == -1):.1%} unusable")
     for seed in args.seeds:

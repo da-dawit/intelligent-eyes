@@ -43,7 +43,7 @@ def posterior(votes_S: np.ndarray, R_S: np.ndarray, log_prior: np.ndarray, ridge
     return softmax(scores(votes_S, R_S, log_prior, ridge))
 
 
-def add_one_look_terms(R_SS: np.ndarray, R_SC: np.ndarray, ridge: float = 1e-6):
+def add_one_look_terms(R_SS: np.ndarray, R_SC: np.ndarray, ridge: float = 1e-6, R_CC_diag: np.ndarray | None = None):
     """Block-inverse quantities for adding one candidate look (derivations, Prop. 4.1).
 
     For every candidate j (a column of R_SC = R[S, candidates]):
@@ -53,9 +53,12 @@ def add_one_look_terms(R_SS: np.ndarray, R_SC: np.ndarray, ridge: float = 1e-6):
     so that adding j changes the total evidence by c_j * (l_j - a_j^T l_S).
 
     Returns a (|S|, C), s (C,), c (C,). One linear solve covers all candidates.
+    R_CC_diag: each candidate's own variance R_jj (1 for a correlation matrix, the default;
+    1 + tau with a shared crop error).
     """
     n = R_SS.shape[0]
     a = np.linalg.solve(R_SS + ridge * np.eye(n), R_SC)
-    s = np.clip(1.0 - np.sum(R_SC * a, axis=0), 1e-9, None)
+    own = 1.0 if R_CC_diag is None else R_CC_diag
+    s = np.clip(own - np.sum(R_SC * a, axis=0), 1e-9, None)
     c = (1.0 - a.sum(axis=0)) / s
     return a, s, c

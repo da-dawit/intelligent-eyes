@@ -244,3 +244,35 @@ def test_masked_fit_ignores_what_is_left_out():
     dirty = resid.copy()
     dirty[~mask] = 1e3 * rng.normal(size=((~mask).sum(), 5))
     np.testing.assert_allclose(fit_A(dirty * mask[..., None], mask), fit_A(resid * mask[..., None], mask), atol=1e-10)
+
+
+def test_shared_crop_error_levels_off_the_crop_weights():
+    """R = I + tau 1_c 1_c^T (one frame): each of the 9 crops gets weight 1/(1 + 9 tau), so the
+    crops together count 9/(1 + 9 tau) < 1/tau, while the glance keeps weight 1."""
+    from eyes.correlation import clip_correlation, evidence_weights
+    A = np.eye(N_POS)
+    np.testing.assert_allclose(clip_correlation(3, A, 0.5, 0.0), np.kron(frame_correlation(3, 0.5), A))
+    tau = 0.5
+    w = evidence_weights(clip_correlation(1, A, 0.0, tau), ridge=0.0)
+    np.testing.assert_allclose(w[0], 1.0, atol=1e-12)
+    np.testing.assert_allclose(w[1:], 1 / (1 + 9 * tau), atol=1e-12)
+    assert w[1:].sum() < 1 / tau
+
+
+
+def test_block_inverse_with_shared_crop_error_matches_recomputation():
+    """Prop. 4.1 with R_jj = 1 + tau: the predicted shift equals recomputing eq. (1)."""
+    from eyes.controller import Clip, Model, candidate_terms, glance_indices, look_indices
+    rng = np.random.default_rng(3)
+    T, K = 3, 5
+    A = shrink(overlap_correlation(), 0.4)
+    model = Model(A, 0.6, np.log(np.full(K, 1 / K)), 1.0, ridge=0.0, tau=0.3)
+    clip = Clip(votes=rng.normal(size=(T, N_POS, K)), mu=np.zeros((T, N_POS, K)))
+    S = glance_indices(T) + [12]
+    C = [i for i in look_indices(T) if i not in S]
+    s, _, _, shift = candidate_terms(clip, model, S, [12], C)
+    R, votes = model.R(T), clip.votes.reshape(-1, K)
+    for n, j in enumerate(C[:6]):
+        B = S + [j]
+        direct = scores(votes[B], R[np.ix_(B, B)], model.log_prior, ridge=0.0) - s
+        np.testing.assert_allclose(shift[n], direct, atol=1e-8)

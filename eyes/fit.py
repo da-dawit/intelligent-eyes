@@ -39,6 +39,18 @@ def choose_shrinkage(clips: list[Clip], A: np.ndarray, rho: float, log_prior: np
     return min(nll, key=nll.get), nll
 
 
+def choose_R(clips: list[Clip], A: np.ndarray, rho: float, log_prior: np.ndarray, sigma2: float,
+             lambdas=(0.0, 0.2, 0.4, 0.6, 0.8), taus=(0.0, 0.05, 0.1, 0.2, 0.4, 0.8), seed: int = 0):
+    """Pick (lam, tau) of R = T_rho (x) A_lam + tau 1_c 1_c^T by held-out NLL.
+
+    Returns (lam, tau, {"lam,tau": nll})."""
+    nll = {f"{lam},{tau}": fused_nll(clips, Model(shrink(A, lam), rho, log_prior, sigma2, tau=tau), seed=seed)
+           for lam in lambdas for tau in taus}
+    best = min(nll, key=nll.get)
+    lam, tau = map(float, best.split(","))
+    return lam, tau, nll
+
+
 def choose_eps(clips: list[Clip], model: Model, budget: int, grid=None, tol: float = 0.005, seed: int = 0,
                rule: str = "eig"):
     """Largest eps whose held-out accuracy is within `tol` of never stopping early.

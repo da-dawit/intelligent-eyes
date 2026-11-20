@@ -25,9 +25,19 @@ def frame_correlation(T: int, rho: float) -> np.ndarray:
     return rho ** np.abs(f[:, None] - f[None, :])
 
 
-def clip_correlation(T: int, A: np.ndarray, rho: float) -> np.ndarray:
-    """R = T_rho (x) A for a clip of T frames: a (10T x 10T) matrix."""
-    return np.kron(frame_correlation(T, rho), A)
+def clip_correlation(T: int, A: np.ndarray, rho: float, tau: float = 0.0) -> np.ndarray:
+    """R = T_rho (x) A + tau 1_c 1_c^T for a clip of T frames: a (10T x 10T) matrix.
+
+    tau adds one error shared by every crop vote of the clip (1_c marks the crop positions,
+    k >= 1), e.g. the crop classifier misreading this camera's light or background. It does
+    not decay with time and does not shrink with more looks, so the total weight of n crop
+    votes levels off near 1/tau instead of growing like n. tau = 0 is the model of Sec. 3.1.
+    """
+    R = np.kron(frame_correlation(T, rho), A)
+    if tau > 0:
+        crop = (np.arange(10 * T) % A.shape[0]) != 0
+        R = R + tau * np.outer(crop, crop)
+    return R
 
 
 def obs_index(f: int, k: int) -> int:
