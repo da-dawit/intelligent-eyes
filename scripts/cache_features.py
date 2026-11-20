@@ -7,7 +7,11 @@
 Writes chunk_00000.npz, chunk_00001.npz, ... each holding `chunk` consecutive rows of
 frames.csv. Finished chunks are skipped, so an interrupted run resumes where it stopped.
 Per frame: g (D) glance feature, crops (9, D) crop features, ubar (9, D) crop previews
-from the glance's patch tokens, thumb (48, 48) grayscale thumbnail. Stored as float16.
+from the glance's patch tokens, thumb (48, 48) grayscale thumbnail, attn (9,) share of the
+glance's CLS attention inside each crop (B3). Stored as float16.
+
+With --hires (baseline B1) only g is stored: the whole 448 x 448 frame in one pass at 2x
+resolution (4x the tokens). Give it its own --out, e.g. .../features/iwildcam/dinov2_hr.
 """
 import argparse
 import time
@@ -48,6 +52,7 @@ def main():
     ap.add_argument("--chunk", type=int, default=2048)
     ap.add_argument("--batch", type=int, default=32, help="frames per encoder call (x10 views)")
     ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument("--hires", action="store_true", help="B1: encode the 448 frame itself, nothing else")
     args = ap.parse_args()
 
     frames = pd.read_csv(args.frames)
@@ -62,7 +67,7 @@ def main():
     dev = pick_device()
     enc = FrozenEncoder(args.encoder, dev)
     masks = torch.from_numpy(token_masks(enc.grid)).to(dev)
-    with_attn = args.encoder != "siglip2"
+    with_attn = args.encoder != "siglip2" and not args.hires
     root = Path(args.images)
 
     # One loader over every pending row (workers start once), flushed chunk by chunk.
@@ -75,14 +80,18 @@ def main():
     n_buf, b_i, t0 = 0, 0, time.time()
     for x, thumb, ok in loader:
         x = x.to(dev).float() / 255.0
-        glances, crops = make_views(x)
-        g, patches = enc(glances)
-        cf, _ = enc(crops.flatten(0, 1))
-        buf["g"].append(g.cpu().numpy().astype(np.float16))
-        buf["ubar"].append(crop_previews(patches, masks).cpu().numpy().astype(np.float16))
-        buf["crops"].append(cf.reshape(len(x), 9, -1).cpu().numpy().astype(np.float16))
-        buf["thumb"].append(thumb.numpy())
         buf["ok"].append(ok.numpy())
+        if args.hires:
+            g, _ = enc(x)
+            buf["g"].append(g.cpu().numpy().astype(np.float16))
+        else:
+            glances, crops = make_views(x)
+            g, patches = enc(glances)
+            cf, _ = enc(crops.flatten(0, 1))
+            buf["g"].append(g.cpu().numpy().astype(np.float16))
+            buf["ubar"].append(crop_previews(patches, masks).cpu().numpy().astype(np.float16))
+            buf["crops"].append(cf.reshape(len(x), 9, -1).cpu().numpy().astype(np.float16))
+            buf["thumb"].append(thumb.numpy())
         if with_attn:
             a = enc.cls_attention(glances)                                       # (B, n, n)
             mass = torch.einsum("bij,kij->bk", a, masks.float()) / a.sum(dim=(1, 2))[:, None]

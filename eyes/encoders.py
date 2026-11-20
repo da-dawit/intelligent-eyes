@@ -81,11 +81,17 @@ class FrozenEncoder(torch.nn.Module):
 
     @torch.no_grad()
     def forward(self, x: torch.Tensor):
-        """x: (B, 3, 224, 224) floats in [0, 1] on self.device."""
+        """x: (B, 3, H, H) floats in [0, 1] on self.device.
+
+        H = 224 for the glance and the looks. H = 448 is baseline B1 (the whole frame at 2x
+        resolution, 4x the tokens): the position embeddings are interpolated to the larger
+        grid (DINOv2 does this by itself, CLIP and SigLIP are told to, DINOv3 uses RoPE).
+        """
         x = ((x - self.mean) / self.std).to(self.dtype)
-        out = self.model(pixel_values=x)
+        resize = x.shape[-1] != VIEW and self.name in ("clip", "siglip2")
+        out = self.model(pixel_values=x, **({"interpolate_pos_encoding": True} if resize else {}))
         tokens = out.last_hidden_state
-        n = self.grid
+        n = x.shape[-1] // self.spec.patch
         patches = tokens[:, -n * n:]
         if self.is_clip:
             # HF CLIP applies its final LayerNorm only to the pooled CLS token; apply it to

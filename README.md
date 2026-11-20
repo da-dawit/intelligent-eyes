@@ -59,7 +59,8 @@ export PYTHONPATH=.
 python scripts/download.py \
     https://huggingface.co/datasets/pangwei/wilds-iwildcam/resolve/78b5e7d858adb01cb5661c7b5f8666a4e91be2cb/iwildcam_v2.0.tar.gz \
     $EYES_DATA/raw/iwildcam_v2.0.tar.gz --sha256 05c872f46eee44315f79bc90f4098c69ae3799a2b95116db02292ea1b4e370d2
-tar xzf $EYES_DATA/raw/iwildcam_v2.0.tar.gz -C $EYES_DATA/raw
+mkdir -p $EYES_DATA/raw/iwildcam_v2.0    # the archive has no top-level folder
+tar xzf $EYES_DATA/raw/iwildcam_v2.0.tar.gz -C $EYES_DATA/raw/iwildcam_v2.0
 
 # 1. clips: WILDS sequences -> bursts of 1-10 frames, one species each
 python scripts/build_clips.py --dataset iwildcam --root $EYES_DATA/raw/iwildcam_v2.0 \
@@ -68,6 +69,10 @@ python scripts/build_clips.py --dataset iwildcam --root $EYES_DATA/raw/iwildcam_
 # 2. encode every frame once: glance, 9 crops, crop previews (resumable)
 python scripts/cache_features.py --frames $EYES_DATA/processed/iwildcam/frames.csv \
     --images $EYES_DATA/raw/iwildcam_v2.0 --encoder dinov2 --out $EYES_DATA/features/iwildcam/dinov2
+
+#    optional, baseline B1: the whole frame at 2x resolution, in its own folder
+python scripts/cache_features.py --frames $EYES_DATA/processed/iwildcam/frames.csv \
+    --images $EYES_DATA/raw/iwildcam_v2.0 --encoder dinov2 --hires --out $EYES_DATA/features/iwildcam/dinov2_hr
 
 # 3. fit on 10% held-out training cameras, run every method on the test clips, 3 seeds
 python scripts/run_eval.py --dataset iwildcam --encoder dinov2 --seeds 0 1 2
@@ -84,7 +89,9 @@ Encoders: `clip` (CLIP B/16), `siglip2` (SigLIP 2 B/16), `dinov2` (DINOv2 B/14),
 | name | what it does | encoder passes |
 |---|---|---|
 | `glance` (B0) | every frame once, combined by eq. (1) | T |
+| `hires` (B1) | every frame once at 2× resolution (448 px, 4× the tokens), combined by eq. (1) | 4T |
 | `random_b2` (B2) | + 2 random looks (10 draws) | T + 2 |
+| `attention_b2` (B3) | + 2 looks where the glance's CLS attention is highest | T + 2 |
 | `motion_b2` (B4) | + 2 looks where consecutive frames differ most | T + 2 |
 | `eyes_b2` | + 2 looks chosen by closed-form EIG | T + 2 |
 | `eyes_mc_b2` | same, with Monte Carlo EIG | T + 2 |

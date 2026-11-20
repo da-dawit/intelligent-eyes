@@ -8,6 +8,8 @@ Per seed (the seed sets the camera split, classifier training, MC samples, rando
   2. turn every cached view into a vote  l = log q - log pi
   3. run each method on every test clip and record the outcome per clip
   4. score every pair of looks of every test clip: metric 4 and the best-pair reference
+B1 (every frame at 2x resolution) runs when a high-res cache exists (<encoder>_hr): its own
+probe, temperature and rho, frames combined by eq. (1) with T_rho; counted as 4 passes a frame.
 Outputs results/<dataset>/<encoder>/seed<k>/{clips.csv.gz, ranking.csv, pairs.csv.gz, fit.json}.
 """
 import argparse
@@ -19,10 +21,11 @@ import numpy as np
 import pandas as pd
 
 from eyes import paths
+from eyes.belief import scores, softmax
 from eyes.cache import load_features
 from eyes.classifier import fit_temperature, train_probe
 from eyes.controller import Clip, Model, run
-from eyes.correlation import class_conditional_residuals, fit_A, fit_rho, shrink
+from eyes.correlation import class_conditional_residuals, fit_A, fit_rho, frame_correlation, shrink
 from eyes.fit import choose_eps, choose_shrinkage
 from eyes.geometry import overlap_correlation
 from eyes.metrics import spearman
@@ -79,7 +82,7 @@ def build_clips(df, votes, mu, thumbs, attn=None):
     return clips
 
 
-def run_seed(frames, feats, seed, out_dir, args):
+def run_seed(frames, feats, hires, seed, out_dir, args):
     t0 = time.time()
     rng = np.random.default_rng(seed)
     ok_clip = frames.groupby("clip_id")["ok"].transform("all")
@@ -139,6 +142,15 @@ def run_seed(frames, feats, seed, out_dir, args):
     models = {"R": model, "I": Model.independent(log_prior, pred.sigma2),
               "overlap": Model(shrink(overlap_correlation(), lam_ov), rho, log_prior, pred.sigma2)}
     eps, eps_table = choose_eps(held_clips, model, budget=max(BUDGETS), seed=seed)
+
+    # ---- B1: the whole frame at 2x resolution, its own probe / temperature / rho
+    if hires is not None:
+        probe_h = train_probe(hires[fit_df["row"].values].astype(np.float32), fit_df["label"].values, K, seed=seed)
+        probe_h.temperature = fit_temperature(probe_h.logits(hires[hr]), hy)
+        lv = (probe_h.log_probs(hires[hr]) - log_prior)[:, None]                  # (N, 1, K)
+        rho_h, _ = fit_rho(class_conditional_residuals(lv, hy, K), held_df["clip_id"].values,
+                           held_df["frame_idx"].values)
+        acc_h = float(np.mean(probe_h.logits(hires[hr]).argmax(1) == hy))
     print(f"  seed {seed}: fitted in {time.time() - t0:.0f}s  K={K} rho={rho:.3f} lam={lam} "
           f"sigma2={pred.sigma2:.3f} eps={eps} T_g={probe_g.temperature:.2f} T_c={probe_c.temperature:.2f}", flush=True)
 
@@ -186,6 +198,15 @@ def run_seed(frames, feats, seed, out_dir, args):
                      ";".join(f"{i // 10}-{i % 10}" for i in r["oracle_looks"]), False))
     pairs = pd.DataFrame(pr)
     print(f"    {'pairs (metric 4)':18s} {time.time() - t1:6.1f}s", flush=True)
+
+    if hires is not None:
+        lv_t = probe_h.log_probs(hires[tr]) - log_prior                          # (N, K)
+        for cid, idx in test_df.groupby("clip_id", sort=False).indices.items():
+            idx = np.sort(idx)
+            p = softmax(scores(lv_t[idx], frame_correlation(len(idx), rho_h), log_prior))
+            y = int(test_df["label"].iloc[idx[0]])
+            rows.append(("hires", 0, cid, int(test_df["camera"].iloc[idx[0]]), len(idx), y, int(p.argmax()),
+                         int(p.argmax()) == y, float(p.max()), float(p[y]), 4 * len(idx), "", False))
     res = pd.DataFrame(rows, columns=["method", "draw", "clip_id", "camera", "T", "label", "pred", "correct",
                                       "conf", "p_true", "passes", "looks", "stopped"])
 
@@ -211,6 +232,8 @@ def run_seed(frames, feats, seed, out_dir, args):
                rho=rho, rho_lag_corr=list(map(float, c_hat)), A_fit=A_fit.round(4).tolist(),
                shrink_lambda=lam, shrink_nll=nll_table, overlap_shrink_lambda=lam_ov, overlap_shrink_nll=nll_ov,
                eps=eps, eps_table={str(k): v for k, v in eps_table.items()}, seconds=time.time() - t0)
+    if hires is not None:
+        fit.update(hires_probe_heldout_acc=acc_h, T_hires=probe_h.temperature, rho_hires=rho_h)
     (out_dir / "fit.json").write_text(json.dumps(fit, indent=2, default=float))
     return res
 
@@ -228,10 +251,16 @@ def main():
     frames = pd.read_csv(paths.processed(args.dataset) / "frames.csv")
     feats = load_features(paths.features(args.dataset, args.encoder), len(frames))
     frames["ok"] = feats["ok"].astype(bool)
+    hr_dir = paths.features(args.dataset, args.encoder + "_hr")
+    hires = None
+    if hr_dir.exists() and any(hr_dir.glob("chunk_*.npz")):
+        h = load_features(hr_dir, len(frames))
+        hires = h["g"]
+        frames["ok"] &= h["ok"].astype(bool)
     print(f"{args.dataset}/{args.encoder}: {len(frames)} frames, {frames['clip_id'].nunique()} clips, "
-          f"{(~frames['ok']).sum()} unreadable frames")
+          f"{(~frames['ok']).sum()} unreadable frames, high-res B1: {'yes' if hires is not None else 'no'}")
     for seed in args.seeds:
-        run_seed(frames, feats, seed, paths.RESULTS / args.dataset / args.encoder / f"seed{seed}", args)
+        run_seed(frames, feats, hires, seed, paths.RESULTS / args.dataset / args.encoder / f"seed{seed}", args)
 
 
 if __name__ == "__main__":

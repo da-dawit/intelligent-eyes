@@ -46,6 +46,13 @@ def encoder_summary(enc_dir: Path):
 
     gain = boot(eyes["correct"] - glance["correct"], eyes["camera"])
     vs_rand = boot(eyes["correct"] - rand["correct"], eyes["camera"])
+    baselines = {"B1 high-res": "hires", "B3 attention": "attention_b2", "B4 motion": "motion_b2"}
+    vs_base = {}
+    for label, m in baselines.items():
+        if m in set(res["method"]):
+            b = per_clip(res, m)
+            vs_base[label] = (b["correct"].mean(), b["passes"].mean(),
+                              boot(eyes["correct"] - b["correct"].loc[eyes.index], eyes["camera"]))
     total = all9["correct"].mean() - glance["correct"].mean()
     recovered = (eyes["correct"].mean() - glance["correct"].mean()) / total if total > 0 else float("nan")
     mcn = []
@@ -67,7 +74,7 @@ def encoder_summary(enc_dir: Path):
                 exact=float(pz["best_is_greedy"].mean()))
 
     row = dict(
-        near=near, acc_best_pair=per_clip(res, "best_pair")["correct"].mean(),
+        vs_base=vs_base, near=near, acc_best_pair=per_clip(res, "best_pair")["correct"].mean(),
         acc_glance=glance["correct"].mean(), acc_eyes=eyes["correct"].mean(), acc_random=rand["correct"].mean(),
         acc_all9=all9["correct"].mean(),
         gain=gain, vs_random=vs_rand, all9_gain=total, recovered=recovered, mcnemar_p_max=max(mcn),
@@ -107,6 +114,10 @@ def main():
             f"| 6. Calibration (ECE) | eyes {row['ece_eyes']:.3f} vs no-R {row['ece_eyes_noR']:.3f}; glance {row['ece_glance']:.3f} vs {row['ece_glance_noR']:.3f}; All-9 {row['ece_all9']:.3f} vs {row['ece_all9_noR']:.3f} | <= 0.05 | {ok(row['ece_eyes'] <= THRESH['ece'])} |",
             "",
             f"Accuracy: glance {100 * row['acc_glance']:.2f}, eyes(2) {100 * row['acc_eyes']:.2f}, random(2) {100 * row['acc_random']:.2f}, best pair (oracle) {100 * row['acc_best_pair']:.2f}, All-9 {100 * row['acc_all9']:.2f}\n",
+            "| Eyes(2) vs. baseline | baseline accuracy | passes/clip | Eyes(2) minus baseline (pts) |", "|---|---|---|---|",
+            *[f"| {k} | {100 * a:.2f} | {n:.1f} | {100 * d[0]:+.2f} [{100 * d[1]:+.2f}, {100 * d[2]:+.2f}] |"
+              for k, (a, n, d) in row["vs_base"].items()],
+            "",
             "| method | passes/clip | accuracy per seed (%) |", "|---|---|---|",
         ]
         for m in acc_seed.index:
