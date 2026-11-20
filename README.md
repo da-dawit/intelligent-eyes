@@ -9,7 +9,9 @@ The eyes glance at every frame of a clip, then spend a small budget of 2× zoome
 most. Nothing is trained except linear classifiers and a ridge regression; the encoders stay frozen.
 
 - Proposal: [docs/proposal.pdf](docs/proposal.pdf)
-- Every equation, derived step by step: [docs/derivations.pdf](docs/derivations.pdf)
+- Every equation, one small step at a time, matched to the code (including the changes made after the first
+  results): [docs/derivations_step_by_step.pdf](docs/derivations_step_by_step.pdf). The original, denser
+  derivations from the proposal: [docs/derivations.pdf](docs/derivations.pdf)
 - Project page with the results and side-by-side examples (open in a browser, works offline):
   [docs/project_page/index.html](docs/project_page/index.html), rebuilt by `scripts/make_project_page.py`
 
