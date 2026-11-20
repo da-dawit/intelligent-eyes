@@ -140,14 +140,14 @@ Accuracy: glance 64.68, eyes(2) 63.23, random(2) 64.22, best pair (oracle) 74.55
 | Eyes(2) vs. baseline | baseline accuracy | passes/clip | Eyes(2) minus baseline (pts) |
 |---|---|---|---|
 | B1 high-res | 67.06 | 4.0 | -3.82 [-4.69, -2.95] |
-| B3 attention | 64.31 | 3.0 | -1.07 [-1.82, -0.36] |
+| B3 attention | 66.00 | 3.0 | -2.77 [-3.44, -2.09] |
 | B4 motion | 64.31 | 3.0 | -1.07 [-1.82, -0.36] |
 
 | method | passes/clip | accuracy per seed (%) |
 |---|---|---|
 | all9 | 10.00 | 60.68, 60.97, 61.11 |
 | all9_noR | 10.00 | 35.75, 38.44, 40.06 |
-| attention_b2 | 3.00 | 64.06, 64.51, 64.35 |
+| attention_b2 | 3.00 | 65.84, 66.05, 66.11 |
 | best_pair | 3.00 | 74.33, 74.67, 74.65 |
 | eyes_b1 | 2.00 | 63.98, 64.03, 64.41 |
 | eyes_b2 | 3.00 | 62.94, 63.47, 63.29 |
@@ -174,7 +174,7 @@ Official metrics (mean over seeds):
 | hires | 0.423 | 0.675 |
 | random_b2 | 0.424 | 0.670 |
 | motion_b2 | 0.420 | 0.655 |
-| attention_b2 | 0.420 | 0.655 |
+| attention_b2 | 0.443 | 0.685 |
 | eyes_b2 | 0.418 | 0.672 |
 | eyes_stop | 0.410 | 0.660 |
 | best_pair | 0.573 | 0.791 |

@@ -202,7 +202,12 @@
       1.3194888178913737
     ]
   },
-  "seconds": 47.94091606140137,
+  "seconds": 29.96331238746643,
+  "vote_shape": {
+    "eps": 0.0,
+    "gain": 1.0
+  },
+  "vote_shape_nll": {},
   "hires_probe_heldout_acc": 0.7492012779552716,
   "T_hires": 0.9822604074240787,
   "rho_hires": 0.0
