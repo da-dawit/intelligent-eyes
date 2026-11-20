@@ -50,35 +50,76 @@ def heldout_cameras(train: pd.DataFrame, frac: float, rng) -> set:
     return set(held)
 
 
-def votes_for(rows, feats, probe_g, probe_c, log_prior, log_pi_crop=None):
+def votes_for(rows, feats, probe_g, probe_c, log_prior, log_pi_crop=None, shape=(0.0, 1.0)):
     """(N, 10, K) votes: glance then the 9 crops, l = log q - log pi.
 
     If the crop classifier has an extra 'empty' class (log_pi_crop given), crop votes are
-    the mixture votes log(q(y|c)/pi(y) + q(empty|c)) of eyes/boxes.py.
+    the mixture votes log(q(y|c)/pi(y) + q(empty|c)) of eyes/boxes.py, shaped by
+    (eps, gain): pi is softened to (1 - eps) pi + eps / K, so that a little probability
+    leaking onto a rare species is not multiplied by 1 / pi(y), and the votes are scaled by
+    `gain`. Both are fitted on held-out cameras (choose_vote_shape).
     """
     N = len(rows)
     D = feats["g"].shape[1]
     lg = probe_g.log_probs(feats["g"][rows]) - log_prior
     lc = probe_c.log_probs(feats["crops"][rows].reshape(-1, D)).reshape(N, 9, -1)
-    lc = mixture_votes(lc, log_pi_crop) if log_pi_crop is not None else lc - log_prior
+    if log_pi_crop is None:
+        lc = lc - log_prior
+    else:
+        eps, gain = shape
+        K = lc.shape[-1] - 1
+        lc = gain * mixture_votes(lc, np.log((1 - eps) * np.exp(log_pi_crop) + eps / K))
     return np.concatenate([lg[:, None], lc], axis=1).astype(np.float32)
+
+
+def choose_vote_shape(held_df, feats, probe_g, probe_c, log_prior, log_pi_crop, seed,
+                      eps_grid=(0.0, 0.1, 0.3), gain_grid=(1.0, 0.7, 0.5, 0.3)):
+    """(eps, gain) with the lowest held-out NLL of eq. (1) (R refitted for each, lam chosen)."""
+    hr, hy, K = held_df["row"].values, held_df["label"].values, len(log_prior)
+    df = held_df.reset_index(drop=True)
+    table = {}
+    for eps in eps_grid:
+        for gain in gain_grid:
+            v = votes_for(hr, feats, probe_g, probe_c, log_prior, log_pi_crop, (eps, gain))
+            r = class_conditional_residuals(v, hy, K)
+            rho, _ = fit_rho(r, df["clip_id"].values, df["frame_idx"].values)
+            lam, nll = choose_shrinkage(build_clips(df, v, np.zeros_like(v), feats["thumb"][hr]), fit_A(r), rho,
+                                        log_prior, 1.0, seed=seed)
+            table[f"{eps},{gain}"] = nll[lam]
+    best = min(table, key=table.get)
+    return tuple(map(float, best.split(","))), table
+
+
+def where_features(frames, feats):
+    """(N, 9, F) cheap 'where is something' cues per crop, from the glance and thumbnails only:
+    log motion (B4's score) and, when cached, the share of the glance's CLS attention (B3's)."""
+    motion = np.zeros((len(frames), 9), np.float32)
+    for _, idx in frames.groupby("clip_id").indices.items():
+        idx = np.sort(idx)
+        motion[idx] = motion_scores(feats["thumb"][frames["row"].values[idx]])
+    cues = [np.log(motion + 1e-3)]
+    if "attn" in feats:
+        cues.append(np.log(feats["attn"][frames["row"].values].astype(np.float32) + 1e-3))
+    return np.stack(cues, axis=2)
 
 
 def predictor_inputs(rows, feats, preview=None):
     """[u_bar_fk ; g_f] for the 9 crops of each frame -> (N * 9, 2D).
 
-    preview: optional (probe_u, log_pi_crop). probe_u classifies a crop's preview u_bar_fk
-    (the glance's own tokens over that crop) as species or 'empty', trained on the same box
-    labels as the crop classifier; its mixture vote -- the look's vote as guessed from the
-    glance alone -- is appended, so the ridge of eq. (2) only has to correct it.
+    preview: optional (probe_u, log_pi_crop, where). probe_u classifies a crop's preview
+    u_bar_fk (the glance's own tokens over that crop, plus the `where` cues if given: a
+    row-indexed (N_all, 9, F) array) as species or 'empty', trained on the same box labels as
+    the crop classifier; its mixture vote -- the look's vote as guessed from the glance alone --
+    is appended, so the ridge of eq. (2) only has to correct it.
     """
     u = feats["ubar"][rows].astype(np.float32)
     g = np.repeat(feats["g"][rows].astype(np.float32)[:, None], 9, axis=1)
     parts = [u, g]
     N, D = u.shape[0], u.shape[2]
     if preview is not None:
-        probe_u, log_pi_crop = preview
-        lq = probe_u.log_probs(u.reshape(-1, D)).reshape(N, 9, -1)
+        probe_u, log_pi_crop, where = preview
+        x = u if where is None else np.concatenate([u, where[rows]], axis=2)
+        lq = probe_u.log_probs(x.reshape(N * 9, -1)).reshape(N, 9, -1)
         parts.append(mixture_votes(lq, log_pi_crop).astype(np.float32))
     return np.concatenate(parts, axis=2).reshape(N * 9, -1)
 
@@ -112,6 +153,10 @@ def crop_training_labels(df, content, K):
 
 def run_seed(frames, feats, hires, seed, out_dir, args, content=None):
     t0 = time.time()
+    where_by_row = None
+    if args.predictor == "preview_where":
+        where_by_row = np.zeros((int(frames["row"].max()) + 1, 9, 2 if "attn" in feats else 1), np.float32)
+        where_by_row[frames["row"].values] = where_features(frames, feats)
     rng = np.random.default_rng(seed)
     ok_clip = frames.groupby("clip_id")["ok"].transform("all")
     frames = frames[ok_clip].reset_index(drop=True)
@@ -158,16 +203,24 @@ def run_seed(frames, feats, hires, seed, out_dir, args, content=None):
     acc_c = float(np.mean(lc_h[ok_c].argmax(1) == yh_c[ok_c]))
 
     # ---- votes, look predictor (eq. 2) on held-out
-    votes_h = votes_for(hr, feats, probe_g, probe_c, log_prior, log_pi_crop)
+    shape, shape_table = (0.0, 1.0), {}
+    if content is not None and args.vote_shape == "fit":
+        shape, shape_table = choose_vote_shape(held_df, feats, probe_g, probe_c, log_prior, log_pi_crop, seed)
+    votes_h = votes_for(hr, feats, probe_g, probe_c, log_prior, log_pi_crop, shape)
     preview = None
-    if args.predictor == "preview":
+    if args.predictor in ("preview", "preview_where"):
         if content is None:
             raise SystemExit("--predictor preview needs --crop-labels boxes")
-        Xu = feats["ubar"][fit_df["row"].values].reshape(-1, D)
-        probe_u = train_probe(Xu[use].astype(np.float32), yc[use], K + 1, seed=seed)
-        lu_h = probe_u.logits(feats["ubar"][hr].reshape(-1, D))
+        where = where_by_row if args.predictor == "preview_where" else None
+
+        def preview_x(rows):
+            u = feats["ubar"][rows].astype(np.float32)
+            return (u if where is None else np.concatenate([u, where[rows]], axis=2)).reshape(len(rows) * 9, -1)
+
+        probe_u = train_probe(preview_x(fit_df["row"].values)[use], yc[use], K + 1, seed=seed)
+        lu_h = probe_u.logits(preview_x(hr))
         probe_u.temperature = fit_temperature(lu_h[ok_c], yh_c[ok_c])
-        preview = (probe_u, log_pi_crop)
+        preview = (probe_u, log_pi_crop, where)
     Xh = predictor_inputs(hr, feats, preview)
     Yh = votes_h[:, 1:].reshape(-1, K)
     groups = np.repeat(held_df["camera"].values, 9)
@@ -201,7 +254,7 @@ def run_seed(frames, feats, hires, seed, out_dir, args, content=None):
 
     # ---- test clips
     tr = test_df["row"].values
-    votes_t = votes_for(tr, feats, probe_g, probe_c, log_prior, log_pi_crop)
+    votes_t = votes_for(tr, feats, probe_g, probe_c, log_prior, log_pi_crop, shape)
     mu_t = np.zeros_like(votes_t)
     mu_t[:, 1:] = pred.predict(predictor_inputs(tr, feats, preview)).reshape(len(tr), 9, K)
     test_df = test_df.reset_index(drop=True)
@@ -277,6 +330,7 @@ def run_seed(frames, feats, hires, seed, out_dir, args, content=None):
                rho=rho, rho_lag_corr=list(map(float, c_hat)), A_fit=A_fit.round(4).tolist(),
                shrink_lambda=lam, shrink_nll=nll_table, overlap_shrink_lambda=lam_ov, overlap_shrink_nll=nll_ov,
                eps=eps, eps_table={str(k): v for k, v in eps_table.items()}, seconds=time.time() - t0)
+    fit.update(vote_shape=dict(eps=shape[0], gain=shape[1]), vote_shape_nll=shape_table)
     if hires is not None:
         fit.update(hires_probe_heldout_acc=acc_h, T_hires=probe_h.temperature, rho_hires=rho_h)
     (out_dir / "fit.json").write_text(json.dumps(fit, indent=2, default=float))
@@ -292,8 +346,11 @@ def main():
     ap.add_argument("--max-crop-rows", type=int, default=300_000)
     ap.add_argument("--ranking-clips", type=int, default=1000)
     ap.add_argument("--crop-labels", choices=["clip", "boxes"], default="clip")
-    ap.add_argument("--predictor", choices=["ridge", "preview"], default="ridge",
-                    help="preview: add the glance-preview classifier's guess of the vote to eq. (2)")
+    ap.add_argument("--vote-shape", choices=["fit", "none"], default="fit",
+                    help="with --crop-labels boxes: fit the prior softening and gain of crop votes on held-out")
+    ap.add_argument("--predictor", choices=["ridge", "preview", "preview_where"], default="ridge",
+                    help="preview: add the glance-preview classifier's guess of the vote to eq. (2); "
+                         "preview_where: the preview classifier also sees motion and attention cues")
     ap.add_argument("--md", default=str(paths.DATA / "raw" / "iwildcam_mdv4" / "iwildcam2022_mdv4_detections.json"))
     args = ap.parse_args()
 
@@ -311,7 +368,8 @@ def main():
     content, tag = None, args.encoder
     if args.crop_labels == "boxes":
         content = crop_labels(frames, load_detections(args.md))
-        tag = f"{args.encoder}-boxes" + ("-preview" if args.predictor == "preview" else "")
+        tag = (f"{args.encoder}-boxes" + {"ridge": "", "preview": "-preview", "preview_where": "-where"}[args.predictor]
+               + ("-shaped" if args.vote_shape == "fit" else ""))
         print(f"crop labels from boxes: {np.mean(content == 1):.1%} animal, {np.mean(content == 0):.1%} empty, "
               f"{np.mean(content == -1):.1%} unusable")
     for seed in args.seeds:
