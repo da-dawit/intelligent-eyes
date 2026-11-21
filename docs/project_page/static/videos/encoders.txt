@@ -1,0 +1,3 @@
+encoders_test-22676.mp4	Prionodon linsang	3	1,1,1,1	CLIP,SigLIP 2,DINOv2,DINOv3
+encoders_test-22026.mp4	Capricornis sumatraensis	6	1,1,1,1	CLIP,SigLIP 2,DINOv2,DINOv3
+encoders_test-14329.mp4	Oryx beisa	10	0,0,1,1	CLIP,SigLIP 2,DINOv2,DINOv3
