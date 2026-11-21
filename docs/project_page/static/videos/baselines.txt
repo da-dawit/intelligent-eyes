@@ -1,0 +1,3 @@
+baselines_test-8510.mp4	Didelphis sp	10	0,1,0,1	random,motion,attention,EIG
+baselines_test-22459.mp4	Madoqua guentheri	6	0,0,1,1	random,motion,attention,EIG
+baselines_test-16303.mp4	Mazama pandora	4	0,0,1,1	random,motion,attention,EIG
