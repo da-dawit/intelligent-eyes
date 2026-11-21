@@ -1,0 +1,8 @@
+gallery_test-11271.mp4	Aepyceros melampus	10	0	1	Aepyceros melampus
+gallery_test-17159.mp4	Meleagris ocellata	5	0	1	Meleagris ocellata
+gallery_test-8438.mp4	Panthera onca	10	1	1	Panthera onca
+gallery_test-12605.mp4	Cephalophus nigrifrons	10	1	1	Cephalophus nigrifrons
+gallery_test-33728.mp4	Crocuta crocuta	3	1	1	Crocuta crocuta
+gallery_test-11352.mp4	Equus quagga	10	4	1	Equus quagga
+gallery_test-14748.mp4	Agouti paca	5	2	0	Leopardus pardalis
+gallery_test-32176.mp4	Funisciurus carruthersi	3	4	0	Protoxerus stangeri
