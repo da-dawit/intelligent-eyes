@@ -12,8 +12,9 @@ most. Nothing is trained except linear classifiers and a ridge regression; the e
 - Every equation, one small step at a time, matched to the code (including the changes made after the first
   results): [docs/derivations_step_by_step.pdf](docs/derivations_step_by_step.pdf). The original, denser
   derivations from the proposal: [docs/derivations.pdf](docs/derivations.pdf)
-- Project page with the results, the benchmarks (success metrics, one change at a time, synthetic clips, DDR)
-  and side-by-side videos (open in a browser, works offline):
+- Project page with the method in brief, 19 videos (where each method looks, the four encoders on one clip, a
+  stopping-rule gallery with failures, before and after the fix) and the benchmarks (success metrics, one change at
+  a time, synthetic clips, DDR); open in a browser, works offline:
   [docs/project_page/index.html](docs/project_page/index.html), rebuilt by `scripts/make_videos.py` and
   `scripts/make_project_page.py`. Online: <https://da-dawit.github.io/intelligent-eyes/> (GitHub Pages serves
   `docs/` from `main`; `docs/index.html` forwards to the page).

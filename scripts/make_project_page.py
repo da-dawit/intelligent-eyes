@@ -411,22 +411,80 @@ def ddr_html(d):
     return f'<table class="table results-table ddr-table"><thead>{head}</thead><tbody>{"".join(rows)}</tbody></table>'
 
 
-def compare_items(video_dir):
-    """The side-by-side videos listed (in order) by make_videos.py in videos.txt: file, species, frames."""
+def video_rows(video_dir, name):
+    """Rows of a list written by make_videos.py (tab-separated; the page shows the videos in this order)."""
+    path = video_dir / name
+    return [line.split("\t") for line in path.read_text().splitlines() if line] if path.exists() else []
+
+
+def video_tag(rel):
+    """A looping, muted video that loads and plays only while on screen (script at the end of the page)."""
+    return (f'<video poster="{rel[:-4]}.jpg" data-inview controls muted loop playsinline preload="none" width="100%">'
+            f'<source src="{rel}" type="video/mp4"></video>')
+
+
+def who(names, right):
+    """'Correct: a, b. Wrong: c.' from a list of names and a '1,0,...' string."""
+    ok = [n for n, r in zip(names, right.split(",")) if r == "1"]
+    bad = [n for n, r in zip(names, right.split(",")) if r != "1"]
+    return " ".join(part for part in (f"Correct: {', '.join(ok)}." if ok else "", f"Wrong: {', '.join(bad)}." if bad else "") if part)
+
+
+def tabbed(items):
+    """One video at a time, with a button per clip (script at the end of the page)."""
+    if not items:
+        return ""
+    buttons = "".join(f'<button class="tag is-medium{" is-active" if i == 0 else ""}">{label}</button>'
+                      for i, (label, _) in enumerate(items))
+    blocks = "".join(block.replace('<div class="video-block">', '<div class="video-block" hidden>', 1) if i else block
+                     for i, (_, block) in enumerate(items))
+    return f'<div class="clip-tabs">{buttons}</div><div class="clip-panels">{blocks}</div>'
+
+
+def grid_items(video_dir, name, num):
+    """Baseline or encoder grids: file, species, frames, correct per panel, panel names."""
     items = []
-    lines = (video_dir / "videos.txt").read_text().splitlines() if (video_dir / "videos.txt").exists() else []
-    for i, line in enumerate(filter(None, lines)):
-        name, species, T = line.split("\t")
-        rel = f"static/videos/{name}"
-        items.append(f"""
+    for file, species, T, right, panels in video_rows(video_dir, name):
+        items.append((f"<i>{species}</i>", f"""
     <div class="video-block">
-      <video poster="{rel.replace('.mp4', '.jpg')}" controls autoplay muted loop playsinline preload="metadata" width="100%">
-        <source src="{rel}" type="video/mp4">
-      </video>
-      <p class="caption"><b>Video {i + 2}.</b> <i>{species}</i>, {T} frames. Left: method as proposed (orange);
-      right: final method (blue); both take two looks.</p>
-    </div>""")
+      {video_tag(f"static/videos/{file}")}
+      <p class="caption"><b>Video {num[0]}.</b> <i>{species}</i>, {T} frames. {who(panels.split(","), right)}</p>
+    </div>"""))
+        num[0] += 1
+    return tabbed(items)
+
+
+def gallery_items(video_dir, num):
+    """Stopping-rule cards: file, species, frames, looks, correct, predicted."""
+    items = []
+    for file, species, T, looks, ok, pred in video_rows(video_dir, "gallery.txt"):
+        n = int(looks)
+        result = ('<span class="verdict pass"><i class="fas fa-check"></i> correct</span>' if ok == "1" else
+                  '<span class="verdict fail"><i class="fas fa-times"></i> wrong</span>')
+        if ok != "1":
+            result += f" (predicted <i>{pred}</i>)"
+        items.append(f"""
+      <div class="column is-half">
+        {video_tag(f"static/videos/{file}")}
+        <p class="caption"><b>Video {num[0]}.</b> <i>{species}</i>, {T} frames, {n} look{'' if n == 1 else 's'}:
+        {result}</p>
+      </div>""")
+        num[0] += 1
     return "".join(items)
+
+
+def compare_items(video_dir, num):
+    """The side-by-side videos (as proposed | final): file, species, frames."""
+    items = []
+    for file, species, T in video_rows(video_dir, "videos.txt"):
+        items.append((f"<i>{species}</i>", f"""
+    <div class="video-block">
+      {video_tag(f"static/videos/{file}")}
+      <p class="caption"><b>Video {num[0]}.</b> <i>{species}</i>, {T} frames. Left: method as proposed (orange);
+      right: final method (blue).</p>
+    </div>"""))
+        num[0] += 1
+    return tabbed(items)
 
 
 PAGE_FILE = Path(__file__).with_name("project_page_template.html")
@@ -461,6 +519,14 @@ CSS = """body { font-family: 'Noto Sans', 'Helvetica Neue', Arial, sans-serif; }
 .bench-nav a.tag:hover { background: #363636; color: #fff; }
 .results h3.title { margin-top: 2.5rem; scroll-margin-top: 1rem; }
 video { display: block; border-radius: 4px; }
+.video-block { margin-top: 1rem; }
+.gallery { margin-top: 0.5rem; }
+.gallery .caption { font-size: 0.85rem; margin: 0.35rem 0 0.5rem; text-align: left; }
+.gallery .verdict { font-weight: 600; }
+.videos h3.title { margin-top: 2.5rem; scroll-margin-top: 1rem; }
+.clip-tabs { margin: 0.75rem 0 0.25rem; }
+.clip-tabs .tag { margin: 0 0.35rem 0.4rem 0; border: 0; cursor: pointer; }
+.clip-tabs .tag.is-active { background: #363636; color: #fff; }
 @media (max-width: 600px) {
   .metrics-table td:first-child, .ladder-table td:first-child { white-space: normal; min-width: 9rem; }
 }
@@ -500,11 +566,16 @@ def main():
     on_animal = [hits_all[e]["eig_final"] for e, _ in ENCODERS]
     looks = {n: (e, r) for n, e, _, r, _ in syn["looks"]}
     lam = {round(x, 2): a9 for x, _, a9 in syn["lam"]}
+    vids, num = out / "static" / "videos", [2]                                    # Video 1 is the teaser
     page = (PAGE_FILE.read_text().replace("__TABLE__", table_html(data))
             .replace("__METRICS__", metrics_html(proposal_metrics(), hits_all))
             .replace("__LADDER__", ladder_html(ladder()))
             .replace("__DDR__", ddr_html(ddr()))
-            .replace("__COMPARE__", compare_items(out / "static" / "videos"))
+            .replace("__BASELINES__", grid_items(vids, "baselines.txt", num))
+            .replace("__ENCODERS__", grid_items(vids, "encoders.txt", num))
+            .replace("__GALLERY__", gallery_items(vids, num))
+            .replace("__COMPARE__", compare_items(vids, num))
+            .replace("__STOP_LOOKS__", f"{data['dinov2']['final']['stop_looks']:.1f}")
             .replace("__GAINS__", f"{min(gains):.1f}&ndash;{max(gains):.1f}")
             .replace("__HITS__", f"{min(on_animal):.0f}&ndash;{max(on_animal):.0f}")
             .replace("__HIT__", f"{hits['eig_final']:.0f}")

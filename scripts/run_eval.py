@@ -332,7 +332,8 @@ def run_seed(frames, feats, hires, seed, out_dir, args, content=None):
         keep = set(args.dump_clips.split(",")) if args.dump_clips else None
         with open(args.dump, "wb") as fh:
             pickle.dump(dict(model=model, clips=[c for c in clips if keep is None or c.clip_id in keep],
-                             classes=classes, rule="eig_mix" if preview is not None else "eig"), fh)
+                             classes=classes, rule="eig_mix" if preview is not None else "eig",
+                             eps=eps_mix if preview is not None else eps), fh)                # stopping threshold
         print(f"  dumped {args.dump}", flush=True)
         return None
 
