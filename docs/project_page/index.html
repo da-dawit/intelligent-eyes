@@ -29,8 +29,8 @@
           </div>
           <div class="column has-text-centered">
             <div class="publication-links">
-              <span class="link-block"><a href="static/pdf/proposal.pdf" class="external-link button is-normal is-rounded is-dark">
-                <span class="icon"><i class="fas fa-file-pdf"></i></span><span>Proposal</span></a></span>
+              <span class="link-block"><a href="static/pdf/midpoint_memo.pdf" class="external-link button is-normal is-rounded is-dark">
+                <span class="icon"><i class="fas fa-file-pdf"></i></span><span>Midpoint memo</span></a></span>
               <span class="link-block"><a href="static/pdf/derivations_step_by_step.pdf" class="external-link button is-normal is-rounded is-dark">
                 <span class="icon"><i class="fas fa-square-root-alt"></i></span><span>Derivations</span></a></span>
               <span class="link-block"><a href="https://github.com/da-dawit/intelligent-eyes" class="external-link button is-normal is-rounded is-dark">
@@ -139,114 +139,184 @@
 <section class="section videos" id="videos">
   <div class="container is-max-desktop">
     <h2 class="title is-3">Videos</h2>
-    <div class="bench-nav">
-      <a class="tag is-medium is-light" href="#where">Where each method looks</a>
-      <a class="tag is-medium is-light" href="#encoders">Four encoders</a>
-      <a class="tag is-medium is-light" href="#gallery">Gallery with the stopping rule</a>
-      <a class="tag is-medium is-light" href="#fix">Before and after the fix</a>
-    </div>
     <div class="content has-text-justified">
       <p>Every video replays the fitted method (seed 0) step by step on iWildCam test clips from cameras not seen in
       training, so each look and each belief shown is the one the method computes. The tracker at the top gives the
       step; under the footage are the clip's frames, faded until glanced, with a box where each look went; the bars
-      give the belief over species, and TRUE marks the true species.</p>
+      give the belief over species, and TRUE marks the true species. Choose a comparison, then a clip.</p>
     </div>
+    <div class="viewer">
+      <div class="viewer-cats">
+        <button class="is-active">Where each method looks <span>6</span></button>
+        <button>Four encoders <span>4</span></button>
+        <button>Stopping-rule gallery <span>12</span></button>
+        <button>Before and after the fix <span>4</span></button>
+      </div>
 
-    <h3 class="title is-4" id="where">Where each method looks</h3>
-    <div class="content has-text-justified">
-      <p>Same clip, same fitted model (DINOv2), same budget of two looks: only the rule that picks the crop
-      changes. Random looks (B2) pick any crop; the motion baseline (B4) picks the crop whose pixels change most
-      between frames; the attention baseline (B3) picks the crop the encoder's CLS token attends to most; the final
-      method picks the largest expected information gain. These clips were chosen because the glance alone is
-      wrong; over all 3,930 test clips the EIG looks are the most accurate of the four for DINOv2 (Table 1). The
-      buttons switch between clips.</p>
-    </div>
-    <div class="clip-tabs"><button class="tag is-medium is-active"><i>Didelphis sp</i></button><button class="tag is-medium"><i>Madoqua guentheri</i></button><button class="tag is-medium"><i>Mazama pandora</i></button></div><div class="clip-panels">
+      <div class="viewer-cat">
+        <div class="content has-text-justified viewer-desc">
+          <p>Same clip, same fitted model (DINOv2), same budget of two looks: only the rule that picks the crop
+          changes. Random looks (B2) pick any crop; the motion baseline (B4) picks the crop whose pixels change most
+          between frames; the attention baseline (B3) picks the crop the encoder's CLS token attends to most; the
+          final method picks the largest expected information gain. The glance alone is wrong on every clip here.
+          Over all 3,930 test clips the EIG looks are the most accurate of the four for DINOv2 (Table 1), but not on
+          every clip: on the <i>Leopardus pardalis</i> clip motion and attention are right and EIG is wrong.</p>
+        </div>
+        <div class="clip-tabs"><button class="tag is-medium is-active"><i>Didelphis sp</i></button><button class="tag is-medium"><i>Madoqua guentheri</i></button><button class="tag is-medium"><i>Mazama pandora</i></button><button class="tag is-medium"><i>Nasua narica</i></button><button class="tag is-medium"><i>Panthera leo</i></button><button class="tag is-medium"><i>Leopardus pardalis</i></button></div><div class="clip-panels">
     <div class="video-block">
       <video poster="static/videos/baselines_test-8510.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/baselines_test-8510.mp4" type="video/mp4"></video>
       <p class="caption"><b>Video 2.</b> <i>Didelphis sp</i>, 10 frames. Correct: motion, EIG. Wrong: random, attention.</p>
     </div>
-    <div class="video-block" hidden>
+    <div hidden class="video-block">
       <video poster="static/videos/baselines_test-22459.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/baselines_test-22459.mp4" type="video/mp4"></video>
       <p class="caption"><b>Video 3.</b> <i>Madoqua guentheri</i>, 6 frames. Correct: attention, EIG. Wrong: random, motion.</p>
     </div>
-    <div class="video-block" hidden>
+    <div hidden class="video-block">
       <video poster="static/videos/baselines_test-16303.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/baselines_test-16303.mp4" type="video/mp4"></video>
       <p class="caption"><b>Video 4.</b> <i>Mazama pandora</i>, 4 frames. Correct: attention, EIG. Wrong: random, motion.</p>
-    </div></div>
-
-    <h3 class="title is-4" id="encoders">The same clip with four encoders</h3>
-    <div class="content has-text-justified">
-      <p>The method is the same for every encoder; each has its own fitted classifiers, correlation matrix and
-      look predictor. In the first two clips the glance is wrong for at least three of the four encoders, and after
-      two looks all four are right. The third clip shows a difference between encoders: the DINO models, whose glances
-      were already right, stay right, while CLIP and SigLIP 2 remain wrong after two looks.</p>
     </div>
-    <div class="clip-tabs"><button class="tag is-medium is-active"><i>Prionodon linsang</i></button><button class="tag is-medium"><i>Capricornis sumatraensis</i></button><button class="tag is-medium"><i>Oryx beisa</i></button></div><div class="clip-panels">
+    <div hidden class="video-block">
+      <video poster="static/videos/baselines_test-9468.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/baselines_test-9468.mp4" type="video/mp4"></video>
+      <p class="caption"><b>Video 5.</b> <i>Nasua narica</i>, 5 frames. Correct: EIG. Wrong: random, motion, attention.</p>
+    </div>
+    <div hidden class="video-block">
+      <video poster="static/videos/baselines_test-12674.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/baselines_test-12674.mp4" type="video/mp4"></video>
+      <p class="caption"><b>Video 6.</b> <i>Panthera leo</i>, 10 frames. Correct: EIG. Wrong: random, motion, attention.</p>
+    </div>
+    <div hidden class="video-block">
+      <video poster="static/videos/baselines_test-5499.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/baselines_test-5499.mp4" type="video/mp4"></video>
+      <p class="caption"><b>Video 7.</b> <i>Leopardus pardalis</i>, 10 frames. Correct: motion, attention. Wrong: random, EIG.</p>
+    </div></div>
+      </div>
+
+      <div class="viewer-cat" hidden>
+        <div class="content has-text-justified viewer-desc">
+          <p>The method is the same for every encoder; each has its own fitted classifiers, correlation matrix and
+          look predictor. On three of these clips the glance is wrong for at least three of the four encoders, and
+          after two looks all four are right. The <i>Oryx beisa</i> clip shows a difference between encoders: the
+          DINO models, whose glances were already right, stay right, while CLIP and SigLIP 2 remain wrong.</p>
+        </div>
+        <div class="clip-tabs"><button class="tag is-medium is-active"><i>Prionodon linsang</i></button><button class="tag is-medium"><i>Capricornis sumatraensis</i></button><button class="tag is-medium"><i>Oryx beisa</i></button><button class="tag is-medium"><i>Martes flavigula</i></button></div><div class="clip-panels">
     <div class="video-block">
       <video poster="static/videos/encoders_test-22676.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/encoders_test-22676.mp4" type="video/mp4"></video>
-      <p class="caption"><b>Video 5.</b> <i>Prionodon linsang</i>, 3 frames. Correct: CLIP, SigLIP 2, DINOv2, DINOv3.</p>
+      <p class="caption"><b>Video 8.</b> <i>Prionodon linsang</i>, 3 frames. Correct: CLIP, SigLIP 2, DINOv2, DINOv3.</p>
     </div>
-    <div class="video-block" hidden>
+    <div hidden class="video-block">
       <video poster="static/videos/encoders_test-22026.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/encoders_test-22026.mp4" type="video/mp4"></video>
-      <p class="caption"><b>Video 6.</b> <i>Capricornis sumatraensis</i>, 6 frames. Correct: CLIP, SigLIP 2, DINOv2, DINOv3.</p>
+      <p class="caption"><b>Video 9.</b> <i>Capricornis sumatraensis</i>, 6 frames. Correct: CLIP, SigLIP 2, DINOv2, DINOv3.</p>
     </div>
-    <div class="video-block" hidden>
+    <div hidden class="video-block">
       <video poster="static/videos/encoders_test-14329.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/encoders_test-14329.mp4" type="video/mp4"></video>
-      <p class="caption"><b>Video 7.</b> <i>Oryx beisa</i>, 10 frames. Correct: DINOv2, DINOv3. Wrong: CLIP, SigLIP 2.</p>
-    </div></div>
-
-    <h3 class="title is-4" id="gallery">Gallery: the stopping rule</h3>
-    <div class="content has-text-justified">
-      <p>Here the method decides how many looks to take: it keeps looking while the best crop's EIG is above a
-      threshold \(\varepsilon\) fitted on held-out cameras, up to four looks (DINOv2). Confident clips stop right
-      after the glance, others take one or two looks, and a hard night clip uses all four; on the whole test set
-      this costs 0.9 looks per clip on average. The last two cards are failures. In the first, look 1
-      finds the paca and makes it the top species, but look 2 pulls the belief back to the ocelot, another spotted
-      animal. In the second, look 1 almost corrects the glance (0.40 against 0.45 for another squirrel species),
-      then three looks land on background and change nothing: the rule still pays for them, which the stopping
-      threshold could learn to avoid.</p>
+      <p class="caption"><b>Video 10.</b> <i>Oryx beisa</i>, 10 frames. Correct: DINOv2, DINOv3. Wrong: CLIP, SigLIP 2.</p>
     </div>
-    <div class="columns is-multiline gallery">
-      <div class="column is-half">
-        <video poster="static/videos/gallery_test-11271.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/gallery_test-11271.mp4" type="video/mp4"></video>
-        <p class="caption"><b>Video 8.</b> <i>Aepyceros melampus</i>, 10 frames, 0 looks:
-        <span class="verdict pass"><i class="fas fa-check"></i> correct</span></p>
+    <div hidden class="video-block">
+      <video poster="static/videos/encoders_test-22724.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/encoders_test-22724.mp4" type="video/mp4"></video>
+      <p class="caption"><b>Video 11.</b> <i>Martes flavigula</i>, 3 frames. Correct: CLIP, SigLIP 2, DINOv2, DINOv3.</p>
+    </div></div>
       </div>
-      <div class="column is-half">
-        <video poster="static/videos/gallery_test-17159.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/gallery_test-17159.mp4" type="video/mp4"></video>
-        <p class="caption"><b>Video 9.</b> <i>Meleagris ocellata</i>, 5 frames, 0 looks:
-        <span class="verdict pass"><i class="fas fa-check"></i> correct</span></p>
+
+      <div class="viewer-cat" hidden>
+        <div class="content has-text-justified viewer-desc">
+          <p>Here the method decides how many looks to take: it keeps looking while the best crop's EIG is above a
+          threshold \(\varepsilon\) fitted on held-out cameras, up to four looks (DINOv2). Confident clips stop right
+          after the glance, others take one to three looks, and a hard night clip uses all four; over the whole test
+          set this costs 0.9 looks per clip on average. The last two are failures. On the
+          <i>Agouti paca</i> clip, look 1 makes the paca the top species, but look 2 pulls the belief back to the
+          ocelot, another spotted animal. On the <i>Funisciurus carruthersi</i> clip, look 1 almost corrects the
+          glance (0.40 against 0.45 for another squirrel species), then three looks land on background and change
+          nothing: the rule still pays for them, which the stopping threshold could learn to avoid.</p>
+        </div>
+        <div class="clip-tabs"><button class="tag is-medium is-active"><i>Aepyceros melampus</i></button><button class="tag is-medium"><i>Meleagris ocellata</i></button><button class="tag is-medium"><i>Panthera onca</i></button><button class="tag is-medium"><i>Cephalophus nigrifrons</i></button><button class="tag is-medium"><i>Crocuta crocuta</i></button><button class="tag is-medium"><i>Equus quagga</i></button><button class="tag is-medium"><i>Bos taurus</i></button><button class="tag is-medium"><i>Tinamus major</i></button><button class="tag is-medium"><i>Crax rubra</i></button><button class="tag is-medium"><i>Sus scrofa</i></button><button class="tag is-medium"><i>Agouti paca</i> <span class="tab-note">wrong</span></button><button class="tag is-medium"><i>Funisciurus carruthersi</i> <span class="tab-note">wrong</span></button></div><div class="clip-panels">
+    <div class="video-block card-block">
+      <video poster="static/videos/gallery_test-11271.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/gallery_test-11271.mp4" type="video/mp4"></video>
+      <p class="caption"><b>Video 12.</b> <i>Aepyceros melampus</i>, 10 frames, 0 looks:
+      <span class="verdict pass"><i class="fas fa-check"></i> correct</span></p>
+    </div>
+    <div hidden class="video-block card-block">
+      <video poster="static/videos/gallery_test-17159.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/gallery_test-17159.mp4" type="video/mp4"></video>
+      <p class="caption"><b>Video 13.</b> <i>Meleagris ocellata</i>, 5 frames, 0 looks:
+      <span class="verdict pass"><i class="fas fa-check"></i> correct</span></p>
+    </div>
+    <div hidden class="video-block card-block">
+      <video poster="static/videos/gallery_test-8438.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/gallery_test-8438.mp4" type="video/mp4"></video>
+      <p class="caption"><b>Video 14.</b> <i>Panthera onca</i>, 10 frames, 1 look:
+      <span class="verdict pass"><i class="fas fa-check"></i> correct</span></p>
+    </div>
+    <div hidden class="video-block card-block">
+      <video poster="static/videos/gallery_test-12605.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/gallery_test-12605.mp4" type="video/mp4"></video>
+      <p class="caption"><b>Video 15.</b> <i>Cephalophus nigrifrons</i>, 10 frames, 1 look:
+      <span class="verdict pass"><i class="fas fa-check"></i> correct</span></p>
+    </div>
+    <div hidden class="video-block card-block">
+      <video poster="static/videos/gallery_test-33728.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/gallery_test-33728.mp4" type="video/mp4"></video>
+      <p class="caption"><b>Video 16.</b> <i>Crocuta crocuta</i>, 3 frames, 1 look:
+      <span class="verdict pass"><i class="fas fa-check"></i> correct</span></p>
+    </div>
+    <div hidden class="video-block card-block">
+      <video poster="static/videos/gallery_test-11352.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/gallery_test-11352.mp4" type="video/mp4"></video>
+      <p class="caption"><b>Video 17.</b> <i>Equus quagga</i>, 10 frames, 4 looks:
+      <span class="verdict pass"><i class="fas fa-check"></i> correct</span></p>
+    </div>
+    <div hidden class="video-block card-block">
+      <video poster="static/videos/gallery_test-11199.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/gallery_test-11199.mp4" type="video/mp4"></video>
+      <p class="caption"><b>Video 18.</b> <i>Bos taurus</i>, 10 frames, 0 looks:
+      <span class="verdict pass"><i class="fas fa-check"></i> correct</span></p>
+    </div>
+    <div hidden class="video-block card-block">
+      <video poster="static/videos/gallery_test-2420.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/gallery_test-2420.mp4" type="video/mp4"></video>
+      <p class="caption"><b>Video 19.</b> <i>Tinamus major</i>, 10 frames, 2 looks:
+      <span class="verdict pass"><i class="fas fa-check"></i> correct</span></p>
+    </div>
+    <div hidden class="video-block card-block">
+      <video poster="static/videos/gallery_test-2375.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/gallery_test-2375.mp4" type="video/mp4"></video>
+      <p class="caption"><b>Video 20.</b> <i>Crax rubra</i>, 10 frames, 2 looks:
+      <span class="verdict pass"><i class="fas fa-check"></i> correct</span></p>
+    </div>
+    <div hidden class="video-block card-block">
+      <video poster="static/videos/gallery_test-33968.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/gallery_test-33968.mp4" type="video/mp4"></video>
+      <p class="caption"><b>Video 21.</b> <i>Sus scrofa</i>, 3 frames, 3 looks:
+      <span class="verdict pass"><i class="fas fa-check"></i> correct</span></p>
+    </div>
+    <div hidden class="video-block card-block">
+      <video poster="static/videos/gallery_test-14748.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/gallery_test-14748.mp4" type="video/mp4"></video>
+      <p class="caption"><b>Video 22.</b> <i>Agouti paca</i>, 5 frames, 2 looks:
+      <span class="verdict fail"><i class="fas fa-times"></i> wrong</span> (predicted <i>Leopardus pardalis</i>)</p>
+    </div>
+    <div hidden class="video-block card-block">
+      <video poster="static/videos/gallery_test-32176.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/gallery_test-32176.mp4" type="video/mp4"></video>
+      <p class="caption"><b>Video 23.</b> <i>Funisciurus carruthersi</i>, 3 frames, 4 looks:
+      <span class="verdict fail"><i class="fas fa-times"></i> wrong</span> (predicted <i>Protoxerus stangeri</i>)</p>
+    </div></div>
       </div>
-      <div class="column is-half">
-        <video poster="static/videos/gallery_test-8438.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/gallery_test-8438.mp4" type="video/mp4"></video>
-        <p class="caption"><b>Video 10.</b> <i>Panthera onca</i>, 10 frames, 1 look:
-        <span class="verdict pass"><i class="fas fa-check"></i> correct</span></p>
-      </div>
-      <div class="column is-half">
-        <video poster="static/videos/gallery_test-12605.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/gallery_test-12605.mp4" type="video/mp4"></video>
-        <p class="caption"><b>Video 11.</b> <i>Cephalophus nigrifrons</i>, 10 frames, 1 look:
-        <span class="verdict pass"><i class="fas fa-check"></i> correct</span></p>
-      </div>
-      <div class="column is-half">
-        <video poster="static/videos/gallery_test-33728.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/gallery_test-33728.mp4" type="video/mp4"></video>
-        <p class="caption"><b>Video 12.</b> <i>Crocuta crocuta</i>, 3 frames, 1 look:
-        <span class="verdict pass"><i class="fas fa-check"></i> correct</span></p>
-      </div>
-      <div class="column is-half">
-        <video poster="static/videos/gallery_test-11352.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/gallery_test-11352.mp4" type="video/mp4"></video>
-        <p class="caption"><b>Video 13.</b> <i>Equus quagga</i>, 10 frames, 4 looks:
-        <span class="verdict pass"><i class="fas fa-check"></i> correct</span></p>
-      </div>
-      <div class="column is-half">
-        <video poster="static/videos/gallery_test-14748.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/gallery_test-14748.mp4" type="video/mp4"></video>
-        <p class="caption"><b>Video 14.</b> <i>Agouti paca</i>, 5 frames, 2 looks:
-        <span class="verdict fail"><i class="fas fa-times"></i> wrong</span> (predicted <i>Leopardus pardalis</i>)</p>
-      </div>
-      <div class="column is-half">
-        <video poster="static/videos/gallery_test-32176.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/gallery_test-32176.mp4" type="video/mp4"></video>
-        <p class="caption"><b>Video 15.</b> <i>Funisciurus carruthersi</i>, 3 frames, 4 looks:
-        <span class="verdict fail"><i class="fas fa-times"></i> wrong</span> (predicted <i>Protoxerus stangeri</i>)</p>
+
+      <div class="viewer-cat" hidden>
+        <div class="content has-text-justified viewer-desc">
+          <p>The method as proposed (left) and the final method (right) on the same test clip, both with two looks
+          and DINOv2; the glance alone is wrong on all four clips. As proposed, the looks often land on background
+          and the belief drifts to a wrong species; after the fix described below, they land on the animal and the
+          true species wins.</p>
+        </div>
+        <div class="clip-tabs"><button class="tag is-medium is-active"><i>Francolinus nobilis</i></button><button class="tag is-medium"><i>Urocyon cinereoargenteus</i></button><button class="tag is-medium"><i>Equus ferus</i></button><button class="tag is-medium"><i>Dasyprocta punctata</i></button></div><div class="clip-panels">
+    <div class="video-block">
+      <video poster="static/videos/compare_test-22020.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/compare_test-22020.mp4" type="video/mp4"></video>
+      <p class="caption"><b>Video 24.</b> <i>Francolinus nobilis</i>, 3 frames. Left: method as proposed (orange);
+      right: final method (blue).</p>
+    </div>
+    <div hidden class="video-block">
+      <video poster="static/videos/compare_test-5531.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/compare_test-5531.mp4" type="video/mp4"></video>
+      <p class="caption"><b>Video 25.</b> <i>Urocyon cinereoargenteus</i>, 10 frames. Left: method as proposed (orange);
+      right: final method (blue).</p>
+    </div>
+    <div hidden class="video-block">
+      <video poster="static/videos/compare_test-8037.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/compare_test-8037.mp4" type="video/mp4"></video>
+      <p class="caption"><b>Video 26.</b> <i>Equus ferus</i>, 10 frames. Left: method as proposed (orange);
+      right: final method (blue).</p>
+    </div>
+    <div hidden class="video-block">
+      <video poster="static/videos/compare_test-2415.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/compare_test-2415.mp4" type="video/mp4"></video>
+      <p class="caption"><b>Video 27.</b> <i>Dasyprocta punctata</i>, 5 frames. Left: method as proposed (orange);
+      right: final method (blue).</p>
+    </div></div>
       </div>
     </div>
   </div>
@@ -364,33 +434,9 @@
       vote of a background crop as evidence against the glance. With the four changes described in the abstract,
       crop accuracy on animal crops rises to 86%, and 96% of the selected crops contain the animal.</p>
     </div>
-    <h3 class="title is-4" id="fix">Before and after the fix</h3>
     <div class="content has-text-justified">
-      <p>One test clip processed by the method as proposed (left) and the final method (right), both with two
-      looks and DINOv2; the buttons switch between four clips. The glance alone is wrong on all four clips. As proposed, the looks often land on background
-      and the belief drifts to a wrong species; after the fix they land on the animal and the true species wins.</p>
+      <p>The videos under <i>Before and after the fix</i> above show four test clips with both versions.</p>
     </div>
-    <div class="clip-tabs"><button class="tag is-medium is-active"><i>Francolinus nobilis</i></button><button class="tag is-medium"><i>Urocyon cinereoargenteus</i></button><button class="tag is-medium"><i>Equus ferus</i></button><button class="tag is-medium"><i>Dasyprocta punctata</i></button></div><div class="clip-panels">
-    <div class="video-block">
-      <video poster="static/videos/compare_test-22020.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/compare_test-22020.mp4" type="video/mp4"></video>
-      <p class="caption"><b>Video 16.</b> <i>Francolinus nobilis</i>, 3 frames. Left: method as proposed (orange);
-      right: final method (blue).</p>
-    </div>
-    <div class="video-block" hidden>
-      <video poster="static/videos/compare_test-5531.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/compare_test-5531.mp4" type="video/mp4"></video>
-      <p class="caption"><b>Video 17.</b> <i>Urocyon cinereoargenteus</i>, 10 frames. Left: method as proposed (orange);
-      right: final method (blue).</p>
-    </div>
-    <div class="video-block" hidden>
-      <video poster="static/videos/compare_test-8037.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/compare_test-8037.mp4" type="video/mp4"></video>
-      <p class="caption"><b>Video 18.</b> <i>Equus ferus</i>, 10 frames. Left: method as proposed (orange);
-      right: final method (blue).</p>
-    </div>
-    <div class="video-block" hidden>
-      <video poster="static/videos/compare_test-2415.jpg" data-inview controls muted loop playsinline preload="none" width="100%"><source src="static/videos/compare_test-2415.mp4" type="video/mp4"></video>
-      <p class="caption"><b>Video 19.</b> <i>Dasyprocta punctata</i>, 5 frames. Left: method as proposed (orange);
-      right: final method (blue).</p>
-    </div></div>
   </div>
 </section>
 
@@ -441,6 +487,16 @@ document.addEventListener("DOMContentLoaded", function () {
     entries.forEach(function (e) { if (e.isIntersecting) { e.target.play().catch(function () {}); } else { e.target.pause(); } });
   }, {threshold: 0.3});
   vids.forEach(function (v) { io.observe(v); });
+  // comparison buttons: show one comparison of the viewer at a time
+  document.querySelectorAll(".viewer").forEach(function (viewer) {
+    var cats = viewer.querySelectorAll(".viewer-cats button"), panels = viewer.querySelectorAll(".viewer-cat");
+    cats.forEach(function (b, i) {
+      b.addEventListener("click", function () {
+        cats.forEach(function (x) { x.classList.toggle("is-active", x === b); });
+        panels.forEach(function (p, j) { p.hidden = j !== i; });
+      });
+    });
+  });
   // clip buttons: show one video of a group at a time (hidden videos stop intersecting, so they pause)
   document.querySelectorAll(".clip-tabs").forEach(function (tabs) {
     var buttons = tabs.querySelectorAll("button"), blocks = tabs.nextElementSibling.children;

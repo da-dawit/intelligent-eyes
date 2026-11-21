@@ -4,5 +4,9 @@ gallery_test-8438.mp4	Panthera onca	10	1	1	Panthera onca
 gallery_test-12605.mp4	Cephalophus nigrifrons	10	1	1	Cephalophus nigrifrons
 gallery_test-33728.mp4	Crocuta crocuta	3	1	1	Crocuta crocuta
 gallery_test-11352.mp4	Equus quagga	10	4	1	Equus quagga
+gallery_test-11199.mp4	Bos taurus	10	0	1	Bos taurus
+gallery_test-2420.mp4	Tinamus major	10	2	1	Tinamus major
+gallery_test-2375.mp4	Crax rubra	10	2	1	Crax rubra
+gallery_test-33968.mp4	Sus scrofa	3	3	1	Sus scrofa
 gallery_test-14748.mp4	Agouti paca	5	2	0	Leopardus pardalis
 gallery_test-32176.mp4	Funisciurus carruthersi	3	4	0	Protoxerus stangeri
