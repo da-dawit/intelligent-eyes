@@ -7,10 +7,14 @@ files are local, so the page also works offline. Numbers come from results/iwild
 method as proposed (<encoder>) and the final method (<encoder>-boxes-preview-gated-tau).
 MegaDetector boxes are used only to measure where looks land; the method never sees them.
 Figures are drawn at the size they are shown (10 in = the 960 px page column) in a plain
-paper style; their explanations are in the HTML captions.
+paper style; their explanations are in the HTML captions. The benchmark tables also read the
+ablation runs, results/ddr/ and results/synthetic/summary.md, and the proposal and derivation PDFs
+are copied next to the page, so docs/project_page/ is a complete site (GitHub Pages serves docs/ from main).
 """
 import argparse
 import pickle
+import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -26,6 +30,7 @@ from eyes import paths  # noqa: E402
 from eyes.boxes import crop_labels, load_detections  # noqa: E402
 from eyes.controller import run  # noqa: E402
 from eyes.geometry import boxes  # noqa: E402
+from summarize import THRESH, encoder_summary  # noqa: E402
 
 ENCODERS = [("clip", "CLIP"), ("dinov2", "DINOv2"), ("dinov3", "DINOv3"), ("siglip2", "SigLIP 2")]
 FINAL = "-boxes-preview-gated-tau"
@@ -39,9 +44,12 @@ plt.rcParams.update({
 
 
 # ------------------------------------------------------------------ numbers
-def load(run_name):
-    files = sorted((paths.RESULTS / "iwildcam" / run_name).glob("seed*/clips.csv.gz"))
-    return pd.concat([pd.read_csv(f).assign(seed=f.parent.name) for f in files])
+def seeds(run_name, dataset="iwildcam"):
+    return sorted((paths.RESULTS / dataset / run_name).glob("seed*/clips.csv.gz"))
+
+
+def load(run_name, dataset="iwildcam"):
+    return pd.concat([pd.read_csv(f).assign(seed=f.parent.name) for f in seeds(run_name, dataset)])
 
 
 def acc(r, m):
@@ -74,9 +82,9 @@ def numbers():
     return out
 
 
-def look_hits(frames, encoder="dinov2"):
-    """Share of 2 looks (3 seeds) on a crop holding the animal, among crops that clearly hold it or
-    clearly don't (eyes/boxes.py: crop_labels). Boxes are used only to measure this."""
+def look_hits(frames, encoders=("dinov2",)):
+    """Per encoder: share of 2 looks (3 seeds) on a crop holding the animal, among crops that clearly
+    hold it or clearly don't (eyes/boxes.py: crop_labels). Boxes are used only to measure this."""
     content = crop_labels(frames, load_detections(paths.DATA / "raw" / "iwildcam_mdv4" / "iwildcam2022_mdv4_detections.json"))
     rows_of = {cid: np.sort(idx) for cid, idx in frames.groupby("clip_id").indices.items()}
 
@@ -92,11 +100,82 @@ def look_hits(frames, encoder="dinov2"):
                     hit += c == 1
         return 100 * hit / max(tot, 1)
 
-    first, final = load(encoder), load(encoder + FINAL)
     c = content[frames.index[frames.split == "test"].values]
-    return dict(chance=100 * (c == 1).sum() / (c >= 0).sum(), random=share(final, "random_b2"),
-                eig_first=share(first, "eyes_b2"), motion=share(final, "motion_b2"),
-                attention=share(final, "attention_b2"), eig_final=share(final, "eyesmix_b2"))
+    chance = 100 * (c == 1).sum() / (c >= 0).sum()
+    out = {}
+    for enc in encoders:
+        first, final = load(enc), load(enc + FINAL)
+        out[enc] = dict(chance=chance, random=share(final, "random_b2"), eig_first=share(first, "eyes_b2"),
+                        motion=share(final, "motion_b2"), attention=share(final, "attention_b2"),
+                        eig_final=share(final, "eyesmix_b2"))
+    return out
+
+
+# Each row adds one change to the row above (README, "Changes from the proposal"): label, run, rule.
+LADDER = [("As proposed", "", "eyes"),
+          ("+ empty class for crops (change 2)", "-boxes", "eyes"),
+          ("+ look predictor starts from a guess (6)", "-boxes-preview", "eyes"),
+          ("+ gated fusion (3)", "-boxes-preview-gated", "eyes"),
+          ("+ two-branch EIG (5)", "-boxes-preview-gated", "eyesmix"),
+          ("+ shared crop error &tau; in <i>R</i> (4): final", FINAL, "eyesmix")]
+
+
+def ladder():
+    """Accuracy with 2 looks and with all crops after each change; None where a run lacks 3 seeds."""
+    out = {}
+    for enc, _ in ENCODERS:
+        for i, (_, suffix, rule) in enumerate(LADDER):
+            if len(seeds(enc + suffix)) < 3:
+                out[enc, i] = None
+                continue
+            r = load(enc + suffix)
+            out[enc, i] = (acc(r, f"{rule}_b2"), acc(r, "all9"))
+    return out
+
+
+def proposal_metrics():
+    """The proposal's success metrics for the final method on iWildCam (scripts/summarize.py)."""
+    return {enc: encoder_summary(paths.RESULTS / "iwildcam" / (enc + FINAL))[0] for enc, _ in ENCODERS}
+
+
+DDR_METHODS = [("glance", "Glance", "1"), ("random_b2", "Random looks", "3"), ("eyes_b2", "Eyes as proposed", "3"),
+               ("hires", "High-res (B1)", "4"), ("all9", "All crops", "10"), ("best_pair", "Best pair (oracle)", "3")]
+
+
+def ddr():
+    """DDR (one photo per clip, grades 0-4): accuracy and quadratic kappa per method, method as proposed."""
+    out = {}
+    for enc, _ in ENCODERS:
+        if len(seeds(enc, "ddr")) < 3:
+            continue
+        r = load(enc, "ddr")
+        official = encoder_summary(paths.RESULTS / "ddr" / enc, ordinal=True)[0]["official"]
+        out[enc] = {m: (acc(r, m), official[m][1]) for m, _, _ in DDR_METHODS if m in official}
+    return out
+
+
+def md_table(text, first_header):
+    """Rows (lists of cell strings) of the markdown table whose header starts with `first_header`."""
+    lines = text.splitlines()
+    i = next(i for i, line in enumerate(lines) if line.startswith("| " + first_header))
+    rows = []
+    for line in lines[i + 2:]:
+        if not line.startswith("|"):
+            break
+        rows.append([c.strip() for c in line.strip().strip("|").split("|")])
+    return rows
+
+
+def synthetic():
+    """results/synthetic/summary.md (scripts/synthetic_study.py): looks budget, shrinkage sweep, All-9."""
+    text = (paths.RESULTS / "synthetic" / "summary.md").read_text()
+    def pm(cell):                                                       # "74.1 ± 1.4" -> (74.1, 1.4)
+        return tuple(float(x) for x in cell.split("\u00b1"))
+    looks = [(int(r[0]), *pm(r[2]), *pm(r[3])) for r in md_table(text, "looks")]
+    lam = [(float(r[0]), float(r[3]), float(r[5])) for r in md_table(text, "lam")]
+    all9, all9_passes = map(float, re.search(r"All-9: ([\d.]+)% \(([\d.]+) passes\)", text).groups())
+    chosen = [float(x) for x in re.search(r"per seed: \[([^\]]+)\]", text).group(1).split(",")]
+    return dict(looks=looks, lam=lam, all9=all9, all9_passes=all9_passes, chosen=chosen)
 
 
 # ------------------------------------------------------------------ figures
@@ -153,6 +232,35 @@ def fig_diagnosis(hits, out):
     b.set_yticks([0, 20, 40, 60, 80, 100])
     b.set_ylabel("looks on the animal (%)")
     letter(b, "b", x=-0.12)
+    fig.savefig(out, dpi=200)
+    plt.close(fig)
+
+
+def fig_synthetic(syn, out):
+    """a: accuracy against looks on synthetic clips with a known R; b: against the shrinkage of A."""
+    fig, (a, b) = plt.subplots(1, 2, figsize=(10, 2.55), layout="constrained")
+    L = np.array(syn["looks"])                                          # looks, eyes mean, sd, random mean, sd
+    a.errorbar(L[:, 0], L[:, 3], yerr=L[:, 4], color=C_RANDOM, marker="s", capsize=2, ms=4.5)
+    a.errorbar(L[:, 0], L[:, 1], yerr=L[:, 2], color=C_FINAL, marker="o", capsize=2, ms=4.5)
+    a.axhline(syn["all9"], color=C_REF, ls="--", lw=1)
+    a.text(L[-1, 0], L[-1, 1] - 4, "eyes (EIG)", color=C_FINAL, ha="right", va="top")           # direct labels
+    a.text(L[-1, 0], L[-1, 3] - 4, "random looks", color=C_RANDOM, ha="right", va="top")
+    a.text(0, syn["all9"] + 1.5, f"all crops ({syn['all9_passes']:.0f} passes)", color=C_REF, ha="left", va="bottom")
+    a.set_xticks(L[:, 0])
+    a.set_xlabel("looks per clip")
+    a.set_ylabel("accuracy (%)")
+    a.set_ylim(30, 90)
+    letter(a, "a", x=-0.09)
+    lam = np.array(syn["lam"])                                          # lambda, eyes (2 looks), all crops
+    b.axvspan(min(syn["chosen"]) - 0.02, max(syn["chosen"]) + 0.02, color="#ececec", zorder=0,
+              label="chosen by held-out likelihood")
+    b.plot(lam[:, 0], lam[:, 2], color=C_REF, marker="^", ls="--", ms=5, label="all crops")
+    b.plot(lam[:, 0], lam[:, 1], color=C_FINAL, marker="o", ms=4.5, label="eyes, 2 looks")
+    b.set_xlabel(r"shrinkage $\lambda$ in $A_\lambda = (1-\lambda)A + \lambda I$")
+    b.set_ylim(30, 90)
+    b.set_xlim(-0.03, 1.03)
+    b.legend(loc="lower right")
+    letter(b, "b", x=-0.09)
     fig.savefig(out, dpi=200)
     plt.close(fig)
 
@@ -241,6 +349,68 @@ def table_html(data):
     return f"<table class=\"table results-table\"><thead>{head}</thead><tbody>{''.join(rows)}</tbody></table>"
 
 
+def verdict(ok, note=""):
+    icon, word = ("check", "pass") if ok else ("times", "fail")
+    return f'<span class="verdict {word}"><i class="fas fa-{icon}"></i> {word}</span>' + (f"<span>{note}</span>" if note else "")
+
+
+def metrics_html(m, hits):
+    """The proposal's success metrics (metric 4 was dropped after the proposal feedback)."""
+    E = [e for e, _ in ENCODERS]
+    gain = [100 * m[e]["gain"][0] for e in E]
+    vs_rand = [100 * m[e]["vs_random"][0] for e in E]
+    rec_ok = [m[e]["recovered"] >= THRESH["recovered"] for e in E if m[e]["all9_gain"] >= THRESH["gain"]]
+    rho = [m[e]["spearman"] for e in E]
+    ece = [m[e]["ece_eyes"] for e in E]
+    ci = [f"{g:+.1f}<span>[{100 * m[e]['gain'][1]:.1f}, {100 * m[e]['gain'][2]:.1f}]</span>" for g, e in zip(gain, E)]
+    n1 = sum(g >= 100 * THRESH["gain"] for g in gain)
+    rows = [("1. Gain over the glance (points)", "&ge; 2 on 3 of 4 encoders", ci,
+             verdict(n1 >= 3, f"{n1} of 4")),
+            ("2. Gain over random looks (points)", "&ge; 1, mean", [f"{v:+.1f}" for v in vs_rand],
+             verdict(np.mean(vs_rand) >= 100 * THRESH["beats_random"], f"mean {np.mean(vs_rand):+.1f}")),
+            ("3. Share of the all-crops gain", "&ge; 2/3", [f"{m[e]['recovered']:.2f}" for e in E],
+             verdict(all(rec_ok))),
+            ("5. EIG ranks the looks (Spearman)", "&ge; 0.3, mean", [f"{v:.2f}" for v in rho],
+             verdict(np.mean(rho) >= THRESH["spearman"], f"mean {np.mean(rho):.2f}")),
+            ("6. Calibration error (ECE)", "&le; 0.05", [f"{v:.3f}" for v in ece],
+             verdict(max(ece) <= THRESH["ece"])),
+            ("Looks that land on the animal (%)", f"chance: {hits[E[0]]['chance']:.0f}",
+             [f"{hits[e]['eig_final']:.0f}" for e in E], "&ndash;")]
+    head = ("<tr><th>Metric</th><th>Threshold</th>" + "".join(f"<th>{n}</th>" for _, n in ENCODERS)
+            + "<th>Result</th></tr>")
+    body = "".join(f"<tr><td>{a}</td><td>{t}</td>" + "".join(f"<td>{c}</td>" for c in cells) + f"<td>{r}</td></tr>"
+                   for a, t, cells, r in rows)
+    return f'<table class="table results-table metrics-table"><thead>{head}</thead><tbody>{body}</tbody></table>'
+
+
+def ladder_html(lad):
+    head = ("<tr><th rowspan=\"2\">Change</th>" + "".join(f"<th colspan=\"2\" class=\"group\">{n}</th>" for _, n in ENCODERS)
+            + "</tr><tr>" + "<th>2 looks</th><th>all crops</th>" * len(ENCODERS) + "</tr>")
+    rows = []
+    for i, (label, _, _) in enumerate(LADDER):
+        cells = []
+        for enc, _ in ENCODERS:
+            v = lad[enc, i]
+            cells += ["&ndash;", "&ndash;"] if v is None else [fmt(v[0]), fmt(v[1])]
+        if i == len(LADDER) - 1:
+            cells = [f"<b>{c}</b>" for c in cells]
+        rows.append(f"<tr><td>{label}</td>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
+    return f'<table class="table results-table ladder-table"><thead>{head}</thead><tbody>{"".join(rows)}</tbody></table>'
+
+
+def ddr_html(d):
+    head = ("<tr><th>Encoder</th>" + "".join(f"<th>{lab}<br><span>{n} pass{'es' if n != '1' else ''}</span></th>" for _, lab, n in DDR_METHODS)
+            + "</tr>")
+    rows = []
+    for enc, name in ENCODERS:
+        if enc not in d:
+            continue
+        cells = "".join("<td>&ndash;</td>" if m not in d[enc] else
+                        f"<td>{d[enc][m][0]:.1f}<span>&kappa; {d[enc][m][1]:.2f}</span></td>" for m, _, _ in DDR_METHODS)
+        rows.append(f"<tr><td>{name}</td>{cells}</tr>")
+    return f'<table class="table results-table ddr-table"><thead>{head}</thead><tbody>{"".join(rows)}</tbody></table>'
+
+
 def compare_items(video_dir):
     """The side-by-side videos listed (in order) by make_videos.py in videos.txt: file, species, frames."""
     items = []
@@ -253,8 +423,8 @@ def compare_items(video_dir):
       <video poster="{rel.replace('.mp4', '.jpg')}" controls autoplay muted loop playsinline preload="metadata" width="100%">
         <source src="{rel}" type="video/mp4">
       </video>
-      <p class="caption"><b>Video {i + 2}.</b> <i>{species}</i>, {T} frames. Left: method as proposed;
-      right: final method.</p>
+      <p class="caption"><b>Video {i + 2}.</b> <i>{species}</i>, {T} frames. Left: method as proposed (orange);
+      right: final method (blue); both take two looks.</p>
     </div>""")
     return "".join(items)
 
@@ -278,6 +448,22 @@ CSS = """body { font-family: 'Noto Sans', 'Helvetica Neue', Arial, sans-serif; }
 .results-table th span { font-weight: 400; color: #7a7a7a; }
 .results-table td { text-align: right; }
 .results-table th:first-child, .results-table td:first-child { text-align: left; }
+.results-table td span { display: block; font-size: 0.78rem; color: #7a7a7a; }
+.results-table th.group { text-align: center; border-bottom-width: 1px; }
+.metrics-table td:nth-child(2) { color: #4a4a4a; white-space: nowrap; }
+.metrics-table td:first-child, .ladder-table td:first-child { white-space: nowrap; }
+.verdict { font-weight: 600; white-space: nowrap; }
+.results-table td span.verdict { display: inline; font-size: inherit; }
+.verdict.pass { color: #198754; }
+.verdict.fail { color: #c82333; }
+.bench-nav { margin: 0.25rem 0 1.25rem; }
+.bench-nav .tag { margin: 0 0.35rem 0.4rem 0; }
+.bench-nav a.tag:hover { background: #363636; color: #fff; }
+.results h3.title { margin-top: 2.5rem; scroll-margin-top: 1rem; }
+video { display: block; border-radius: 4px; }
+@media (max-width: 600px) {
+  .metrics-table td:first-child, .ladder-table td:first-child { white-space: normal; min-width: 9rem; }
+}
 pre { white-space: pre; overflow-x: auto; }
 .method h4 { font-size: 1.1rem; margin: 1.6rem 0 0.4rem; }
 .method ul { margin-top: 0.25rem; }
@@ -297,20 +483,40 @@ def main():
     out = Path(args.out)
     for sub in ("images", "css"):
         (out / "static" / sub).mkdir(parents=True, exist_ok=True)
+    (out / "static" / "pdf").mkdir(parents=True, exist_ok=True)
+    for name in ("proposal.pdf", "derivations_step_by_step.pdf"):                  # linked from the page
+        shutil.copy2(paths.REPO / "docs" / name, out / "static" / "pdf" / name)
     frames = pd.read_csv(paths.processed("iwildcam") / "frames.csv")
     data = numbers()
-    hits = look_hits(frames)
+    hits_all = look_hits(frames, [e for e, _ in ENCODERS])
+    hits = hits_all["dinov2"]
+    syn = synthetic()
     fig_curves(data, out / "static" / "images" / "curves.png")
     fig_diagnosis(hits, out / "static" / "images" / "diagnosis.png")
+    fig_synthetic(syn, out / "static" / "images" / "synthetic.png")
     if args.final_dump:
         fig_method(args.final_dump, frames, out / "static" / "images" / "method.png", args.method_clip)
     gains = [data[e]["final"]["eyes"][1] - data[e]["final"]["glance"] for e, _ in ENCODERS]
+    on_animal = [hits_all[e]["eig_final"] for e, _ in ENCODERS]
+    looks = {n: (e, r) for n, e, _, r, _ in syn["looks"]}
+    lam = {round(x, 2): a9 for x, _, a9 in syn["lam"]}
     page = (PAGE_FILE.read_text().replace("__TABLE__", table_html(data))
+            .replace("__METRICS__", metrics_html(proposal_metrics(), hits_all))
+            .replace("__LADDER__", ladder_html(ladder()))
+            .replace("__DDR__", ddr_html(ddr()))
             .replace("__COMPARE__", compare_items(out / "static" / "videos"))
             .replace("__GAINS__", f"{min(gains):.1f}&ndash;{max(gains):.1f}")
+            .replace("__HITS__", f"{min(on_animal):.0f}&ndash;{max(on_animal):.0f}")
             .replace("__HIT__", f"{hits['eig_final']:.0f}")
             .replace("__CHANCE__", f"{hits['chance']:.0f}")
-            .replace("__FIRST_HIT__", f"{hits['eig_first']:.0f}"))
+            .replace("__FIRST_HIT__", f"{hits['eig_first']:.0f}")
+            .replace("__SYN_EYES2__", f"{looks[2][0]:.0f}")
+            .replace("__SYN_RAND2__", f"{looks[2][1]:.0f}")
+            .replace("__SYN_GLANCE__", f"{looks[0][0]:.0f}")
+            .replace("__SYN_ALL9__", f"{syn['all9']:.0f}")
+            .replace("__SYN_ALL9_PASSES__", f"{syn['all9_passes']:.0f}")
+            .replace("__SYN_LAM0__", f"{lam[0.0]:.0f}")
+            .replace("__SYN_LAMBEST__", f"{max(lam.values()):.0f}"))
     (out / "static" / "css" / "index.css").write_text(CSS)
     (out / "index.html").write_text(page)
     print(f"wrote {out / 'index.html'}")

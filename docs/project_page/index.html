@@ -29,13 +29,13 @@
           </div>
           <div class="column has-text-centered">
             <div class="publication-links">
-              <span class="link-block"><a href="../proposal.pdf" class="external-link button is-normal is-rounded is-dark">
+              <span class="link-block"><a href="static/pdf/proposal.pdf" class="external-link button is-normal is-rounded is-dark">
                 <span class="icon"><i class="fas fa-file-pdf"></i></span><span>Proposal</span></a></span>
-              <span class="link-block"><a href="../derivations_step_by_step.pdf" class="external-link button is-normal is-rounded is-dark">
+              <span class="link-block"><a href="static/pdf/derivations_step_by_step.pdf" class="external-link button is-normal is-rounded is-dark">
                 <span class="icon"><i class="fas fa-square-root-alt"></i></span><span>Derivations</span></a></span>
               <span class="link-block"><a href="https://github.com/da-dawit/intelligent-eyes" class="external-link button is-normal is-rounded is-dark">
                 <span class="icon"><i class="fab fa-github"></i></span><span>Code</span></a></span>
-              <span class="link-block"><a href="../../results/iwildcam/summary_final.md" class="external-link button is-normal is-rounded is-dark">
+              <span class="link-block"><a href="#results" class="external-link button is-normal is-rounded is-dark">
                 <span class="icon"><i class="fas fa-table"></i></span><span>Results</span></a></span>
             </div>
           </div>
@@ -53,9 +53,9 @@
       </video>
       <h2 class="subtitle has-text-centered">
         <b>Video 1.</b> The final method on three iWildCam test clips from cameras not seen in training (DINOv2).
-        Each frame is encoded once at 224&nbsp;px; two 2&times; crops are then selected by expected information
-        gain. The strip at the bottom gives the most probable species and the probability of the true species after
-        each step.
+        Each frame is encoded once at 224&nbsp;px (the glance); two 2&times; crops are then chosen by expected
+        information gain. Under the footage: the clip's frames, faded until glanced, with boxes where the looks went.
+        Right: the belief over species after each step (TRUE marks the true species) and the encoder passes used.
       </h2>
     </div>
   </div>
@@ -79,7 +79,7 @@
           therefore train the crop classifier with an <i>empty</i> class using detector boxes (training data only),
           exclude crops classified as empty from the fusion, add an error term shared by the crops of a clip to
           \(R\), and compute the EIG over an animal and a background outcome. On the WILDS iWildCam test cameras,
-          two crops then improve accuracy by 4.5&ndash;9.6 points over the glance for four frozen encoders, 96% of the
+          two crops then improve accuracy by 4.5&ndash;9.6 points over the glance for four frozen encoders, 95&ndash;97% of the
           selected crops contain the animal, and with the stopping rule about one crop per clip matches encoding all
           crops of every frame.</p>
         </div>
@@ -181,14 +181,23 @@
       <p>The belief is updated with step 2, and steps 3&ndash;4 repeat until the budget of looks is spent or the
       largest EIG falls below a threshold \(\varepsilon\), also fitted on held-out cameras. A clip with two looks
       costs \(T+2\) encoder passes; encoding every crop of every frame costs \(10T\). Every formula above is
-      derived step by step, with numbers, in the <a href="../derivations_step_by_step.pdf">derivation notes</a>.</p>
+      derived step by step, with numbers, in the <a href="static/pdf/derivations_step_by_step.pdf">derivation notes</a>.</p>
     </div>
   </div>
 </section>
 
-<section class="section">
+<section class="section results" id="results">
   <div class="container is-max-desktop">
     <h2 class="title is-3">Results</h2>
+    <div class="bench-nav">
+      <a class="tag is-medium is-light" href="#iwildcam">iWildCam</a>
+      <a class="tag is-medium is-light" href="#metrics">Success metrics</a>
+      <a class="tag is-medium is-light" href="#ablation">One change at a time</a>
+      <a class="tag is-medium is-light" href="#synthetic">Synthetic clips</a>
+      <a class="tag is-medium is-light" href="#ddr">DDR retina photos</a>
+    </div>
+
+    <h3 class="title is-4" id="iwildcam">iWildCam: accuracy and cost</h3>
     <div class="content has-text-justified">
       <p>iWildCam (WILDS split): 3,930 test clips from 48 cameras not seen in training; clip accuracy (%), mean of 3
       seeds. <i>T</i> is the number of frames in a clip; the second header row gives the encoder passes per clip.</p>
@@ -207,6 +216,70 @@
       frame (dashed line). It is also more accurate than the 2&times; high-resolution pass (B1) and the motion
       baseline (B4) for every encoder; for DINOv3 the attention baseline (B3) is 0.6 points higher.</p>
     </div>
+
+    <h3 class="title is-4" id="metrics">Success metrics fixed in the proposal</h3>
+    <p class="caption"><b>Table 2.</b> The proposal's success metrics for the final method on iWildCam, with the
+    thresholds fixed before any results. Brackets: 95% interval from resampling the test cameras. Metric 4 (greedy
+    pair against the best pair) was dropped with side question 2 after the proposal feedback. The last row is not a
+    proposal metric: the share of looks on a crop that contains the animal (MegaDetector boxes, used only to
+    measure this).</p>
+    <div class="table-container"><table class="table results-table metrics-table"><thead><tr><th>Metric</th><th>Threshold</th><th>CLIP</th><th>DINOv2</th><th>DINOv3</th><th>SigLIP 2</th><th>Result</th></tr></thead><tbody><tr><td>1. Gain over the glance (points)</td><td>&ge; 2 on 3 of 4 encoders</td><td>+9.2<span>[7.3, 11.2]</span></td><td>+4.5<span>[3.1, 6.3]</span></td><td>+5.8<span>[4.2, 8.2]</span></td><td>+9.6<span>[7.5, 11.8]</span></td><td><span class="verdict pass"><i class="fas fa-check"></i> pass</span><span>4 of 4</span></td></tr><tr><td>2. Gain over random looks (points)</td><td>&ge; 1, mean</td><td>+6.0</td><td>+3.2</td><td>+3.9</td><td>+6.1</td><td><span class="verdict pass"><i class="fas fa-check"></i> pass</span><span>mean +4.8</span></td></tr><tr><td>3. Share of the all-crops gain</td><td>&ge; 2/3</td><td>1.16</td><td>1.01</td><td>0.97</td><td>1.16</td><td><span class="verdict pass"><i class="fas fa-check"></i> pass</span></td></tr><tr><td>5. EIG ranks the looks (Spearman)</td><td>&ge; 0.3, mean</td><td>0.31</td><td>0.28</td><td>0.34</td><td>0.35</td><td><span class="verdict pass"><i class="fas fa-check"></i> pass</span><span>mean 0.32</span></td></tr><tr><td>6. Calibration error (ECE)</td><td>&le; 0.05</td><td>0.020</td><td>0.041</td><td>0.040</td><td>0.031</td><td><span class="verdict pass"><i class="fas fa-check"></i> pass</span></td></tr><tr><td>Looks that land on the animal (%)</td><td>chance: 58</td><td>95</td><td>96</td><td>97</td><td>95</td><td>&ndash;</td></tr></tbody></table></div>
+    <div class="content has-text-justified">
+      <p>All five metrics pass. Every gain in metric 1 is significant on every seed (McNemar test), and the looks
+      recover the whole gain of encoding all crops (metric 3 near 1) at a fraction of the passes. The closest margin
+      is the ranking metric: DINOv2's EIG ranks looks with Spearman 0.28, below 0.3, while the mean over the four
+      encoders passes.</p>
+    </div>
+
+    <h3 class="title is-4" id="ablation">One change at a time</h3>
+    <p class="caption"><b>Table 3.</b> Clip accuracy (%) on the iWildCam test cameras after each change, mean of 3
+    seeds. Each row adds one change to the row above (numbers refer to the changes listed in the README). "2 looks":
+    <i>T</i>&nbsp;+&nbsp;2 passes; "all crops": every crop of every frame, 10<i>T</i> passes. The DINOv3 run with only
+    the empty class finished one seed of three and is left out.</p>
+    <div class="table-container"><table class="table results-table ladder-table"><thead><tr><th rowspan="2">Change</th><th colspan="2" class="group">CLIP</th><th colspan="2" class="group">DINOv2</th><th colspan="2" class="group">DINOv3</th><th colspan="2" class="group">SigLIP 2</th></tr><tr><th>2 looks</th><th>all crops</th><th>2 looks</th><th>all crops</th><th>2 looks</th><th>all crops</th><th>2 looks</th><th>all crops</th></tr></thead><tbody><tr><td>As proposed</td><td>64.2</td><td>51.9</td><td>79.5</td><td>62.0</td><td>75.3</td><td>56.9</td><td>64.8</td><td>50.3</td></tr><tr><td>+ empty class for crops (change 2)</td><td>72.9</td><td>44.9</td><td>85.7</td><td>77.1</td><td>&ndash;</td><td>&ndash;</td><td>76.3</td><td>50.1</td></tr><tr><td>+ look predictor starts from a guess (6)</td><td>73.7</td><td>44.9</td><td>85.6</td><td>77.1</td><td>83.3</td><td>68.2</td><td>76.5</td><td>50.1</td></tr><tr><td>+ gated fusion (3)</td><td>75.6</td><td>62.5</td><td>85.8</td><td>83.4</td><td>83.8</td><td>79.1</td><td>78.5</td><td>70.3</td></tr><tr><td>+ two-branch EIG (5)</td><td>76.4</td><td>62.5</td><td>86.3</td><td>83.4</td><td>84.5</td><td>79.1</td><td>79.4</td><td>70.3</td></tr><tr><td>+ shared crop error &tau; in <i>R</i> (4): final</td><td><b>76.4</b></td><td><b>75.1</b></td><td><b>86.1</b></td><td><b>86.0</b></td><td><b>84.1</b></td><td><b>84.2</b></td><td><b>78.9</b></td><td><b>77.6</b></td></tr></tbody></table></div>
+    <div class="content has-text-justified">
+      <p>The empty class gives most of the gain with two looks: 6 to 12 points over the method as proposed. The
+      look predictor's guess changes little on its own, and the two-branch EIG adds 0.5 to 0.9 points once fusion
+      is gated. The "all crops" columns show what gating and the shared crop error &tau; fix: as long as background
+      crops entered eq. (1), encoding every crop was worse than the glance alone. Leaving out crops classified as
+      empty and adding &tau; to <i>R</i> raise it by 9 to 30 points, until all crops and two looks agree. &tau;
+      barely changes two looks; it is what makes more looks safe.</p>
+    </div>
+
+    <h3 class="title is-4" id="synthetic">Synthetic clips with a known <i>R</i></h3>
+    <img src="static/images/synthetic.png" alt="Results on synthetic clips" class="figure">
+    <p class="caption"><b>Figure 3.</b> Synthetic clips generated with a known correlation matrix (3 seeds &times;
+    1,000 test clips; <code>eyes/synthetic.py</code>). (a) Accuracy against the number of looks (mean &plusmn;
+    standard deviation). (b) Accuracy against the shrinkage &lambda; of the within-frame table <i>A</i>; grey band:
+    the &lambda; chosen per seed by held-out likelihood.</p>
+    <div class="content has-text-justified">
+      <p>Before any real data, the method was checked where the right answer is known. There the EIG picks
+      informative crops: two looks lift accuracy from 37% to 74%, against 44%
+      for two random looks, and encoding all crops (55 passes) reaches 80%. Panel (b)
+      is where change 1 was found: with <i>A</i> as derived from crop overlap (&lambda;&nbsp;=&nbsp;0) the four
+      corner crops tile the frame, <i>A</i> is singular, and combining all crops falls to 45%; shrinking
+      <i>A</i> towards the identity brings it back to 80%.</p>
+    </div>
+
+    <h3 class="title is-4" id="ddr">DDR: diabetic retinopathy photos (not solved yet)</h3>
+    <div class="content has-text-justified">
+      <p>DDR's grading split: retina photos graded 0&ndash;4 for diabetic retinopathy, 3,759 test photos from the
+      official list. Each photo is a one-frame clip, so the glance is one pass. Only the method <i>as proposed</i>
+      has been run here: its crop classifier is still trained with the photo's grade on every crop, the failure that
+      the empty class fixed on iWildCam.</p>
+    </div>
+    <p class="caption"><b>Table 4.</b> DDR test photos, method as proposed, mean of 3 seeds: accuracy (%) and, below
+    it, quadratic &kappa; (the usual DDR metric). The best pair is an oracle that knows the label: it shows how much
+    the right two crops could add.</p>
+    <div class="table-container"><table class="table results-table ddr-table"><thead><tr><th>Encoder</th><th>Glance<br><span>1 pass</span></th><th>Random looks<br><span>3 passes</span></th><th>Eyes as proposed<br><span>3 passes</span></th><th>High-res (B1)<br><span>4 passes</span></th><th>All crops<br><span>10 passes</span></th><th>Best pair (oracle)<br><span>3 passes</span></th></tr></thead><tbody><tr><td>CLIP</td><td>61.6<span>&kappa; 0.59</span></td><td>61.6<span>&kappa; 0.63</span></td><td>60.6<span>&kappa; 0.64</span></td><td>61.0<span>&kappa; 0.58</span></td><td>60.6<span>&kappa; 0.64</span></td><td>71.8<span>&kappa; 0.77</span></td></tr><tr><td>DINOv2</td><td>64.1<span>&kappa; 0.63</span></td><td>64.0<span>&kappa; 0.67</span></td><td>63.2<span>&kappa; 0.67</span></td><td>66.3<span>&kappa; 0.67</span></td><td>61.6<span>&kappa; 0.66</span></td><td>75.5<span>&kappa; 0.80</span></td></tr><tr><td>DINOv3</td><td>64.7<span>&kappa; 0.64</span></td><td>64.2<span>&kappa; 0.67</span></td><td>63.2<span>&kappa; 0.67</span></td><td>67.1<span>&kappa; 0.68</span></td><td>60.9<span>&kappa; 0.67</span></td><td>74.5<span>&kappa; 0.79</span></td></tr><tr><td>SigLIP 2</td><td>61.8<span>&kappa; 0.60</span></td><td>61.6<span>&kappa; 0.65</span></td><td>60.5<span>&kappa; 0.65</span></td><td>61.1<span>&kappa; 0.59</span></td><td>59.9<span>&kappa; 0.66</span></td><td>72.3<span>&kappa; 0.78</span></td></tr></tbody></table></div>
+    <div class="content has-text-justified">
+      <p>As on iWildCam before the fixes, looks chosen this way lower accuracy by about one point, and encoding all
+      crops lowers it by 1 to 4 points. Quadratic &kappa;, which also counts how far a wrong grade is from the true
+      one, rises with any looks, but random looks raise it just as much: the EIG as proposed does not find better
+      crops than chance. Only the 2&times; high-resolution pass helps accuracy, and only for the two DINO encoders.
+      The detail is there: the best pair of crops is about 10 points above the glance. The planned fix uses DDR's
+      lesion masks to label crops, the counterpart of the animal boxes.</p>
+    </div>
   </div>
 </section>
 
@@ -222,29 +295,29 @@
       <video poster="static/videos/compare_test-22020.jpg" controls autoplay muted loop playsinline preload="metadata" width="100%">
         <source src="static/videos/compare_test-22020.mp4" type="video/mp4">
       </video>
-      <p class="caption"><b>Video 2.</b> <i>Francolinus nobilis</i>, 3 frames. Left: method as proposed;
-      right: final method.</p>
+      <p class="caption"><b>Video 2.</b> <i>Francolinus nobilis</i>, 3 frames. Left: method as proposed (orange);
+      right: final method (blue); both take two looks.</p>
     </div>
     <div class="video-block">
       <video poster="static/videos/compare_test-5531.jpg" controls autoplay muted loop playsinline preload="metadata" width="100%">
         <source src="static/videos/compare_test-5531.mp4" type="video/mp4">
       </video>
-      <p class="caption"><b>Video 3.</b> <i>Urocyon cinereoargenteus</i>, 10 frames. Left: method as proposed;
-      right: final method.</p>
+      <p class="caption"><b>Video 3.</b> <i>Urocyon cinereoargenteus</i>, 10 frames. Left: method as proposed (orange);
+      right: final method (blue); both take two looks.</p>
     </div>
     <div class="video-block">
       <video poster="static/videos/compare_test-8037.jpg" controls autoplay muted loop playsinline preload="metadata" width="100%">
         <source src="static/videos/compare_test-8037.mp4" type="video/mp4">
       </video>
-      <p class="caption"><b>Video 4.</b> <i>Equus ferus</i>, 10 frames. Left: method as proposed;
-      right: final method.</p>
+      <p class="caption"><b>Video 4.</b> <i>Equus ferus</i>, 10 frames. Left: method as proposed (orange);
+      right: final method (blue); both take two looks.</p>
     </div>
     <div class="video-block">
       <video poster="static/videos/compare_test-2415.jpg" controls autoplay muted loop playsinline preload="metadata" width="100%">
         <source src="static/videos/compare_test-2415.mp4" type="video/mp4">
       </video>
-      <p class="caption"><b>Video 5.</b> <i>Dasyprocta punctata</i>, 5 frames. Left: method as proposed;
-      right: final method.</p>
+      <p class="caption"><b>Video 5.</b> <i>Dasyprocta punctata</i>, 5 frames. Left: method as proposed (orange);
+      right: final method (blue); both take two looks.</p>
     </div>
   </div>
 </section>
@@ -253,7 +326,7 @@
   <div class="container is-max-desktop">
     <h2 class="title is-3">What went wrong first</h2>
     <img src="static/images/diagnosis.png" alt="Diagnosis of the first failure mode" class="figure">
-    <p class="caption"><b>Figure 3.</b> Diagnosis of the first failure mode (DINOv2). (a) Top-1 accuracy of the crop
+    <p class="caption"><b>Figure 4.</b> Diagnosis of the first failure mode (DINOv2). (a) Top-1 accuracy of the crop
     classifier on crops that contain the animal, trained with clip labels or with an empty class (seed 0); dashed:
     the glance on whole frames. (b) Share of the two selected looks that land on a crop containing the animal (3
     seeds); dashed: chance. MegaDetector boxes are used only for this measurement.</p>

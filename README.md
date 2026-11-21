@@ -12,8 +12,11 @@ most. Nothing is trained except linear classifiers and a ridge regression; the e
 - Every equation, one small step at a time, matched to the code (including the changes made after the first
   results): [docs/derivations_step_by_step.pdf](docs/derivations_step_by_step.pdf). The original, denser
   derivations from the proposal: [docs/derivations.pdf](docs/derivations.pdf)
-- Project page with the results and side-by-side examples (open in a browser, works offline):
-  [docs/project_page/index.html](docs/project_page/index.html), rebuilt by `scripts/make_project_page.py`
+- Project page with the results, the benchmarks (success metrics, one change at a time, synthetic clips, DDR)
+  and side-by-side videos (open in a browser, works offline):
+  [docs/project_page/index.html](docs/project_page/index.html), rebuilt by `scripts/make_videos.py` and
+  `scripts/make_project_page.py`. Online: <https://da-dawit.github.io/intelligent-eyes/> (GitHub Pages serves
+  `docs/` from `main`; `docs/index.html` forwards to the page).
 
 ## How the code maps to the mathematics
 
@@ -47,7 +50,7 @@ Clip accuracy (%), 2 looks. *First run*: the method exactly as proposed. *Final*
 |---|---|---|---|---|---|---|---|---|
 | CLIP | 67.1 | 64.2 | **76.4** | 76.2 (1.6) | 75.8 | 70.8 | 65.9 | 75.1 |
 | DINOv2 | 81.6 | 79.5 | **86.1** | 86.3 (0.9) | 85.5 | 85.1 | 85.4 | 86.0 |
-| DINOv3 | 78.2 | 75.3 | **84.1** | 84.1 (1.1) | 83.0 | 84.7 | 82.2 | 84.2 |
+| DINOv3 | 78.2 | 75.3 | **84.1** | 84.1 (1.0) | 83.0 | 84.7 | 82.2 | 84.2 |
 | SigLIP 2 | 69.3 | 64.8 | **78.9** | 78.9 (1.2) | 78.2 | — | 68.8 | 77.6 |
 
 With the final method all six success metrics of the proposal pass for CLIP, DINOv3 and SigLIP 2,
@@ -197,7 +200,7 @@ eyes/         the method (geometry, correlation, belief, predictor, eig, control
 scripts/      build_clips -> cache_features -> fetch_boxes -> run_eval -> summarize;
               diagnose_crops (failure-mode analysis), cloud_run.sh, benchmark_encoder, fix_attention
 tests/        derivation checks, pair formulas, synthetic end-to-end checks
-docs/         proposal and derivations
+docs/         proposal, derivations, and the project page (docs/project_page/)
 ```
 
 ## Data and model licences

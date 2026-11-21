@@ -15,6 +15,22 @@ body { font-family: 'Noto Sans', 'Helvetica Neue', Arial, sans-serif; }
 .results-table th span { font-weight: 400; color: #7a7a7a; }
 .results-table td { text-align: right; }
 .results-table th:first-child, .results-table td:first-child { text-align: left; }
+.results-table td span { display: block; font-size: 0.78rem; color: #7a7a7a; }
+.results-table th.group { text-align: center; border-bottom-width: 1px; }
+.metrics-table td:nth-child(2) { color: #4a4a4a; white-space: nowrap; }
+.metrics-table td:first-child, .ladder-table td:first-child { white-space: nowrap; }
+.verdict { font-weight: 600; white-space: nowrap; }
+.results-table td span.verdict { display: inline; font-size: inherit; }
+.verdict.pass { color: #198754; }
+.verdict.fail { color: #c82333; }
+.bench-nav { margin: 0.25rem 0 1.25rem; }
+.bench-nav .tag { margin: 0 0.35rem 0.4rem 0; }
+.bench-nav a.tag:hover { background: #363636; color: #fff; }
+.results h3.title { margin-top: 2.5rem; scroll-margin-top: 1rem; }
+video { display: block; border-radius: 4px; }
+@media (max-width: 600px) {
+  .metrics-table td:first-child, .ladder-table td:first-child { white-space: normal; min-width: 9rem; }
+}
 pre { white-space: pre; overflow-x: auto; }
 .method h4 { font-size: 1.1rem; margin: 1.6rem 0 0.4rem; }
 .method ul { margin-top: 0.25rem; }
