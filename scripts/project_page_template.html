@@ -29,8 +29,8 @@
           </div>
           <div class="column has-text-centered">
             <div class="publication-links">
-              <span class="link-block"><a href="static/pdf/proposal.pdf" class="external-link button is-normal is-rounded is-dark">
-                <span class="icon"><i class="fas fa-file-pdf"></i></span><span>Proposal</span></a></span>
+              <span class="link-block"><a href="static/pdf/midpoint_memo.pdf" class="external-link button is-normal is-rounded is-dark">
+                <span class="icon"><i class="fas fa-file-pdf"></i></span><span>Midpoint memo</span></a></span>
               <span class="link-block"><a href="static/pdf/derivations_step_by_step.pdf" class="external-link button is-normal is-rounded is-dark">
                 <span class="icon"><i class="fas fa-square-root-alt"></i></span><span>Derivations</span></a></span>
               <span class="link-block"><a href="https://github.com/da-dawit/intelligent-eyes" class="external-link button is-normal is-rounded is-dark">
@@ -139,51 +139,65 @@
 <section class="section videos" id="videos">
   <div class="container is-max-desktop">
     <h2 class="title is-3">Videos</h2>
-    <div class="bench-nav">
-      <a class="tag is-medium is-light" href="#where">Where each method looks</a>
-      <a class="tag is-medium is-light" href="#encoders">Four encoders</a>
-      <a class="tag is-medium is-light" href="#gallery">Gallery with the stopping rule</a>
-      <a class="tag is-medium is-light" href="#fix">Before and after the fix</a>
-    </div>
     <div class="content has-text-justified">
       <p>Every video replays the fitted method (seed 0) step by step on iWildCam test clips from cameras not seen in
       training, so each look and each belief shown is the one the method computes. The tracker at the top gives the
       step; under the footage are the clip's frames, faded until glanced, with a box where each look went; the bars
-      give the belief over species, and TRUE marks the true species.</p>
+      give the belief over species, and TRUE marks the true species. Choose a comparison, then a clip.</p>
     </div>
+    <div class="viewer">
+      <div class="viewer-cats">
+        <button class="is-active">Where each method looks <span>__NB__</span></button>
+        <button>Four encoders <span>__NE__</span></button>
+        <button>Stopping-rule gallery <span>__NG__</span></button>
+        <button>Before and after the fix <span>__NC__</span></button>
+      </div>
 
-    <h3 class="title is-4" id="where">Where each method looks</h3>
-    <div class="content has-text-justified">
-      <p>Same clip, same fitted model (DINOv2), same budget of two looks: only the rule that picks the crop
-      changes. Random looks (B2) pick any crop; the motion baseline (B4) picks the crop whose pixels change most
-      between frames; the attention baseline (B3) picks the crop the encoder's CLS token attends to most; the final
-      method picks the largest expected information gain. These clips were chosen because the glance alone is
-      wrong; over all 3,930 test clips the EIG looks are the most accurate of the four for DINOv2 (Table 1). The
-      buttons switch between clips.</p>
-    </div>
-    __BASELINES__
+      <div class="viewer-cat">
+        <div class="content has-text-justified viewer-desc">
+          <p>Same clip, same fitted model (DINOv2), same budget of two looks: only the rule that picks the crop
+          changes. Random looks (B2) pick any crop; the motion baseline (B4) picks the crop whose pixels change most
+          between frames; the attention baseline (B3) picks the crop the encoder's CLS token attends to most; the
+          final method picks the largest expected information gain. The glance alone is wrong on every clip here.
+          Over all 3,930 test clips the EIG looks are the most accurate of the four for DINOv2 (Table 1), but not on
+          every clip: on the <i>Leopardus pardalis</i> clip motion and attention are right and EIG is wrong.</p>
+        </div>
+        __BASELINES__
+      </div>
 
-    <h3 class="title is-4" id="encoders">The same clip with four encoders</h3>
-    <div class="content has-text-justified">
-      <p>The method is the same for every encoder; each has its own fitted classifiers, correlation matrix and
-      look predictor. In the first two clips the glance is wrong for at least three of the four encoders, and after
-      two looks all four are right. The third clip shows a difference between encoders: the DINO models, whose glances
-      were already right, stay right, while CLIP and SigLIP 2 remain wrong after two looks.</p>
-    </div>
-    __ENCODERS__
+      <div class="viewer-cat" hidden>
+        <div class="content has-text-justified viewer-desc">
+          <p>The method is the same for every encoder; each has its own fitted classifiers, correlation matrix and
+          look predictor. On three of these clips the glance is wrong for at least three of the four encoders, and
+          after two looks all four are right. The <i>Oryx beisa</i> clip shows a difference between encoders: the
+          DINO models, whose glances were already right, stay right, while CLIP and SigLIP 2 remain wrong.</p>
+        </div>
+        __ENCODERS__
+      </div>
 
-    <h3 class="title is-4" id="gallery">Gallery: the stopping rule</h3>
-    <div class="content has-text-justified">
-      <p>Here the method decides how many looks to take: it keeps looking while the best crop's EIG is above a
-      threshold \(\varepsilon\) fitted on held-out cameras, up to four looks (DINOv2). Confident clips stop right
-      after the glance, others take one or two looks, and a hard night clip uses all four; on the whole test set
-      this costs __STOP_LOOKS__ looks per clip on average. The last two cards are failures. In the first, look 1
-      finds the paca and makes it the top species, but look 2 pulls the belief back to the ocelot, another spotted
-      animal. In the second, look 1 almost corrects the glance (0.40 against 0.45 for another squirrel species),
-      then three looks land on background and change nothing: the rule still pays for them, which the stopping
-      threshold could learn to avoid.</p>
-    </div>
-    <div class="columns is-multiline gallery">__GALLERY__
+      <div class="viewer-cat" hidden>
+        <div class="content has-text-justified viewer-desc">
+          <p>Here the method decides how many looks to take: it keeps looking while the best crop's EIG is above a
+          threshold \(\varepsilon\) fitted on held-out cameras, up to four looks (DINOv2). Confident clips stop right
+          after the glance, others take one to three looks, and a hard night clip uses all four; over the whole test
+          set this costs __STOP_LOOKS__ looks per clip on average. The last two are failures. On the
+          <i>Agouti paca</i> clip, look 1 makes the paca the top species, but look 2 pulls the belief back to the
+          ocelot, another spotted animal. On the <i>Funisciurus carruthersi</i> clip, look 1 almost corrects the
+          glance (0.40 against 0.45 for another squirrel species), then three looks land on background and change
+          nothing: the rule still pays for them, which the stopping threshold could learn to avoid.</p>
+        </div>
+        __GALLERY__
+      </div>
+
+      <div class="viewer-cat" hidden>
+        <div class="content has-text-justified viewer-desc">
+          <p>The method as proposed (left) and the final method (right) on the same test clip, both with two looks
+          and DINOv2; the glance alone is wrong on all four clips. As proposed, the looks often land on background
+          and the belief drifts to a wrong species; after the fix described below, they land on the animal and the
+          true species wins.</p>
+        </div>
+        __COMPARE__
+      </div>
     </div>
   </div>
 </section>
@@ -300,13 +314,9 @@
       vote of a background crop as evidence against the glance. With the four changes described in the abstract,
       crop accuracy on animal crops rises to 86%, and __HIT__% of the selected crops contain the animal.</p>
     </div>
-    <h3 class="title is-4" id="fix">Before and after the fix</h3>
     <div class="content has-text-justified">
-      <p>One test clip processed by the method as proposed (left) and the final method (right), both with two
-      looks and DINOv2; the buttons switch between four clips. The glance alone is wrong on all four clips. As proposed, the looks often land on background
-      and the belief drifts to a wrong species; after the fix they land on the animal and the true species wins.</p>
+      <p>The videos under <i>Before and after the fix</i> above show four test clips with both versions.</p>
     </div>
-    __COMPARE__
   </div>
 </section>
 
@@ -357,6 +367,16 @@ document.addEventListener("DOMContentLoaded", function () {
     entries.forEach(function (e) { if (e.isIntersecting) { e.target.play().catch(function () {}); } else { e.target.pause(); } });
   }, {threshold: 0.3});
   vids.forEach(function (v) { io.observe(v); });
+  // comparison buttons: show one comparison of the viewer at a time
+  document.querySelectorAll(".viewer").forEach(function (viewer) {
+    var cats = viewer.querySelectorAll(".viewer-cats button"), panels = viewer.querySelectorAll(".viewer-cat");
+    cats.forEach(function (b, i) {
+      b.addEventListener("click", function () {
+        cats.forEach(function (x) { x.classList.toggle("is-active", x === b); });
+        panels.forEach(function (p, j) { p.hidden = j !== i; });
+      });
+    });
+  });
   // clip buttons: show one video of a group at a time (hidden videos stop intersecting, so they pause)
   document.querySelectorAll(".clip-tabs").forEach(function (tabs) {
     var buttons = tabs.querySelectorAll("button"), blocks = tabs.nextElementSibling.children;

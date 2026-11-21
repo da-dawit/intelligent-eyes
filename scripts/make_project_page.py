@@ -8,7 +8,7 @@ method as proposed (<encoder>) and the final method (<encoder>-boxes-preview-gat
 MegaDetector boxes are used only to measure where looks land; the method never sees them.
 Figures are drawn at the size they are shown (10 in = the 960 px page column) in a plain
 paper style; their explanations are in the HTML captions. The benchmark tables also read the
-ablation runs, results/ddr/ and results/synthetic/summary.md, and the proposal and derivation PDFs
+ablation runs, results/ddr/ and results/synthetic/summary.md, and the midpoint memo and derivation PDFs
 are copied next to the page, so docs/project_page/ is a complete site (GitHub Pages serves docs/ from main).
 """
 import argparse
@@ -436,7 +436,7 @@ def tabbed(items):
         return ""
     buttons = "".join(f'<button class="tag is-medium{" is-active" if i == 0 else ""}">{label}</button>'
                       for i, (label, _) in enumerate(items))
-    blocks = "".join(block.replace('<div class="video-block">', '<div class="video-block" hidden>', 1) if i else block
+    blocks = "".join(block.replace('<div class="video-block', '<div hidden class="video-block', 1) if i else block
                      for i, (_, block) in enumerate(items))
     return f'<div class="clip-tabs">{buttons}</div><div class="clip-panels">{blocks}</div>'
 
@@ -463,14 +463,15 @@ def gallery_items(video_dir, num):
                   '<span class="verdict fail"><i class="fas fa-times"></i> wrong</span>')
         if ok != "1":
             result += f" (predicted <i>{pred}</i>)"
-        items.append(f"""
-      <div class="column is-half">
-        {video_tag(f"static/videos/{file}")}
-        <p class="caption"><b>Video {num[0]}.</b> <i>{species}</i>, {T} frames, {n} look{'' if n == 1 else 's'}:
-        {result}</p>
-      </div>""")
+        label = f"<i>{species}</i>" + ("" if ok == "1" else ' <span class="tab-note">wrong</span>')
+        items.append((label, f"""
+    <div class="video-block card-block">
+      {video_tag(f"static/videos/{file}")}
+      <p class="caption"><b>Video {num[0]}.</b> <i>{species}</i>, {T} frames, {n} look{'' if n == 1 else 's'}:
+      {result}</p>
+    </div>"""))
         num[0] += 1
-    return "".join(items)
+    return tabbed(items)
 
 
 def compare_items(video_dir, num):
@@ -520,9 +521,17 @@ CSS = """body { font-family: 'Noto Sans', 'Helvetica Neue', Arial, sans-serif; }
 .results h3.title { margin-top: 2.5rem; scroll-margin-top: 1rem; }
 video { display: block; border-radius: 4px; }
 .video-block { margin-top: 1rem; }
-.gallery { margin-top: 0.5rem; }
-.gallery .caption { font-size: 0.85rem; margin: 0.35rem 0 0.5rem; text-align: left; }
-.gallery .verdict { font-weight: 600; }
+.viewer { margin-top: 1rem; border: 1px solid #e4e4e4; border-radius: 8px; padding: 1rem 1.25rem 0.5rem; }
+.viewer-cats { display: flex; flex-wrap: wrap; gap: 0.4rem; border-bottom: 1px solid #e4e4e4; padding-bottom: 0.9rem; }
+.viewer-cats button { font: inherit; font-size: 0.95rem; padding: 0.45rem 0.9rem; border: 1px solid #dbdbdb;
+  border-radius: 999px; background: #fff; color: #363636; cursor: pointer; }
+.viewer-cats button span { color: #7a7a7a; font-size: 0.8rem; margin-left: 0.2rem; }
+.viewer-cats button.is-active { background: #363636; border-color: #363636; color: #fff; }
+.viewer-cats button.is-active span { color: #d0d0d0; }
+.viewer-desc { margin: 0.9rem 0 0.25rem; font-size: 0.95rem; }
+.card-block { max-width: 560px; margin-left: auto; margin-right: auto; }
+.tab-note { font-style: normal; font-size: 0.75rem; color: #c82333; margin-left: 0.2rem; }
+.clip-tabs .tag.is-active .tab-note { color: #ffb3b3; }
 .videos h3.title { margin-top: 2.5rem; scroll-margin-top: 1rem; }
 .clip-tabs { margin: 0.75rem 0 0.25rem; }
 .clip-tabs .tag { margin: 0 0.35rem 0.4rem 0; border: 0; cursor: pointer; }
@@ -550,7 +559,7 @@ def main():
     for sub in ("images", "css"):
         (out / "static" / sub).mkdir(parents=True, exist_ok=True)
     (out / "static" / "pdf").mkdir(parents=True, exist_ok=True)
-    for name in ("proposal.pdf", "derivations_step_by_step.pdf"):                  # linked from the page
+    for name in ("midpoint_memo.pdf", "derivations_step_by_step.pdf"):             # linked from the page
         shutil.copy2(paths.REPO / "docs" / name, out / "static" / "pdf" / name)
     frames = pd.read_csv(paths.processed("iwildcam") / "frames.csv")
     data = numbers()
@@ -576,6 +585,10 @@ def main():
             .replace("__GALLERY__", gallery_items(vids, num))
             .replace("__COMPARE__", compare_items(vids, num))
             .replace("__STOP_LOOKS__", f"{data['dinov2']['final']['stop_looks']:.1f}")
+            .replace("__NB__", str(len(video_rows(vids, "baselines.txt"))))
+            .replace("__NE__", str(len(video_rows(vids, "encoders.txt"))))
+            .replace("__NG__", str(len(video_rows(vids, "gallery.txt"))))
+            .replace("__NC__", str(len(video_rows(vids, "videos.txt"))))
             .replace("__GAINS__", f"{min(gains):.1f}&ndash;{max(gains):.1f}")
             .replace("__HITS__", f"{min(on_animal):.0f}&ndash;{max(on_animal):.0f}")
             .replace("__HIT__", f"{hits['eig_final']:.0f}")
