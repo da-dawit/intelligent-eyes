@@ -375,7 +375,7 @@ def metrics_html(m, hits):
              verdict(np.mean(rho) >= THRESH["spearman"], f"mean {np.mean(rho):.2f}")),
             ("6. Calibration error (ECE)", "&le; 0.05", [f"{v:.3f}" for v in ece],
              verdict(max(ece) <= THRESH["ece"])),
-            ("Looks that land on the animal (%)", f"chance: {hits[E[0]]['chance']:.0f}",
+            ("Looks that land on the animal (%)", f"chance is {hits[E[0]]['chance']:.0f}",
              [f"{hits[e]['eig_final']:.0f}" for e in E], "&ndash;")]
     head = ("<tr><th>Metric</th><th>Threshold</th>" + "".join(f"<th>{n}</th>" for _, n in ENCODERS)
             + "<th>Result</th></tr>")
@@ -424,11 +424,22 @@ def video_tag(rel):
             f'<source src="{rel}" type="video/mp4"></video>')
 
 
-def who(names, right):
-    """Caption text 'Correct: a, b. Wrong: c.' from the panel names and a '1,0,...' string."""
+def and_list(xs):
+    """'a', 'a and b', 'a, b and c'."""
+    return xs[0] if len(xs) == 1 else ", ".join(xs[:-1]) + " and " + xs[-1]
+
+
+def who(names, right, noun):
+    """One sentence saying which panels get the species right, from the panel names and a '1,0,...' string."""
     ok = [n for n, r in zip(names, right.split(",")) if r == "1"]
     bad = [n for n, r in zip(names, right.split(",")) if r != "1"]
-    return " ".join(part for part in (f"Correct: {', '.join(ok)}." if ok else "", f"Wrong: {', '.join(bad)}." if bad else "") if part)
+    if not bad:
+        return f"All four {noun} get it right."
+    if not ok:
+        return f"All four {noun} get it wrong."
+    verb = lambda xs: "gets" if len(xs) == 1 else "get"
+    s = f"{and_list(ok)} {verb(ok)} it right, and {and_list(bad)} {verb(bad)} it wrong."
+    return s[0].upper() + s[1:]
 
 
 def tabbed(items):
@@ -449,7 +460,7 @@ def grid_items(video_dir, name, num):
         items.append((f"<i>{species}</i>", f"""
     <div class="video-block">
       {video_tag(f"static/videos/{file}")}
-      <p class="caption"><b>Video {num[0]}.</b> <i>{species}</i>, {T} frames. {who(panels.split(","), right)}</p>
+      <p class="caption"><b>Video {num[0]}.</b> <i>{species}</i>, {T} frames. {who(panels.split(","), right, "encoders" if "encoders" in name else "methods")}</p>
     </div>"""))
         num[0] += 1
     return tabbed(items)
@@ -460,16 +471,14 @@ def gallery_items(video_dir, num):
     items = []
     for file, species, T, looks, ok, pred in video_rows(video_dir, "gallery.txt"):
         n = int(looks)
-        result = ('<span class="verdict pass"><i class="fas fa-check"></i> correct</span>' if ok == "1" else
-                  '<span class="verdict fail"><i class="fas fa-times"></i> wrong</span>')
-        if ok != "1":
-            result += f" (it says <i>{pred}</i>)"
+        took = ("It stops right after the glance" if n == 0 else "It uses all four looks" if n == 4 else
+                f"It takes {n} look{'' if n == 1 else 's'}")
+        result = "and gets the species right" if ok == "1" else f"but ends on <i>{pred}</i>, which is wrong"
         label = f"<i>{species}</i>" + ("" if ok == "1" else ' <span class="tab-note">wrong</span>')
         items.append((label, f"""
     <div class="video-block card-block">
       {video_tag(f"static/videos/{file}")}
-      <p class="caption"><b>Video {num[0]}.</b> <i>{species}</i>, {T} frames and {n} look{'' if n == 1 else 's'}.
-      The prediction is {result}.</p>
+      <p class="caption"><b>Video {num[0]}.</b> <i>{species}</i>, {T} frames. {took} {result}.</p>
     </div>"""))
         num[0] += 1
     return tabbed(items)
@@ -482,8 +491,7 @@ def compare_items(video_dir, num):
         items.append((f"<i>{species}</i>", f"""
     <div class="video-block">
       {video_tag(f"static/videos/{file}")}
-      <p class="caption"><b>Video {num[0]}.</b> <i>{species}</i>, {T} frames. The method as proposed is on the left
-      (orange) and the final method is on the right (blue).</p>
+      <p class="caption"><b>Video {num[0]}.</b> <i>{species}</i>, {T} frames.</p>
     </div>"""))
         num[0] += 1
     return tabbed(items)
