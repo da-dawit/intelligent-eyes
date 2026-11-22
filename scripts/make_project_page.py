@@ -8,7 +8,7 @@ proposed (<encoder>) and the final method (<encoder>-boxes-preview-gated-tau). M
 used only to measure where looks land. The method never sees them.
 Figures are drawn at the size they are shown (10 in = the 960 px page column) in a plain paper style,
 and the HTML captions explain them. The benchmark tables also read the ablation runs, results/ddr/ and
-results/synthetic/summary.md. The midpoint memo and derivation PDFs are copied next to the page, so
+results/synthetic/summary.md. The midpoint memo PDF is copied next to the page, so
 docs/project_page/ is a complete site (GitHub Pages serves docs/ from main).
 """
 import argparse
@@ -568,7 +568,7 @@ def main():
     for sub in ("images", "css"):
         (out / "static" / sub).mkdir(parents=True, exist_ok=True)
     (out / "static" / "pdf").mkdir(parents=True, exist_ok=True)
-    for name in ("midpoint_memo.pdf", "derivations_step_by_step.pdf"):             # linked from the page
+    for name in ("midpoint_memo.pdf",):             # linked from the page
         shutil.copy2(paths.REPO / "docs" / name, out / "static" / "pdf" / name)
     frames = pd.read_csv(paths.processed("iwildcam") / "frames.csv")
     data = numbers()

@@ -9,9 +9,6 @@ The eyes glance at every frame of a clip. Then they spend a small budget of 2x z
 I train nothing except linear classifiers and a ridge regression. The encoders stay frozen.
 
 - Proposal: [docs/proposal.pdf](docs/proposal.pdf). Midpoint memo: [docs/midpoint_memo.pdf](docs/midpoint_memo.pdf).
-- All the equations, worked one small step at a time and matched to the code (including the changes I made
-  after the first results), are in [docs/derivations_step_by_step.pdf](docs/derivations_step_by_step.pdf).
-  The original, denser derivations from the proposal are in [docs/derivations.pdf](docs/derivations.pdf).
 - The project page is [docs/project_page/index.html](docs/project_page/index.html). It opens in a browser
   and works offline. It has the method in brief, 27 videos in one viewer and the benchmarks. The videos show
   where each method looks, the four encoders on one clip, a stopping-rule gallery with failures, and before
@@ -221,7 +218,7 @@ eyes/         the method (geometry, correlation, belief, predictor, eig, control
 scripts/      build_clips -> cache_features -> fetch_boxes -> run_eval -> summarize;
               diagnose_crops (failure-mode analysis), cloud_run.sh, benchmark_encoder, fix_attention
 tests/        derivation checks, pair formulas, synthetic end-to-end checks
-docs/         proposal, derivations, and the project page (docs/project_page/)
+docs/         proposal, midpoint memo, and the project page (docs/project_page/)
 ```
 
 ## Data and model licences

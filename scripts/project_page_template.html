@@ -31,8 +31,6 @@
             <div class="publication-links">
               <span class="link-block"><a href="static/pdf/midpoint_memo.pdf" class="external-link button is-normal is-rounded is-dark">
                 <span class="icon"><i class="fas fa-file-pdf"></i></span><span>Midpoint memo</span></a></span>
-              <span class="link-block"><a href="static/pdf/derivations_step_by_step.pdf" class="external-link button is-normal is-rounded is-dark">
-                <span class="icon"><i class="fas fa-square-root-alt"></i></span><span>Derivations</span></a></span>
               <span class="link-block"><a href="https://github.com/da-dawit/intelligent-eyes" class="external-link button is-normal is-rounded is-dark">
                 <span class="icon"><i class="fab fa-github"></i></span><span>Code</span></a></span>
               <span class="link-block"><a href="#results" class="external-link button is-normal is-rounded is-dark">
@@ -101,9 +99,7 @@
     <div class="content has-text-justified method">
       <p>The model keeps a belief \(p(y)\) over the species \(y\) of a clip with \(T\) frames. It starts from the
       training prior \(\pi(y)\) and is updated by Bayes' rule after every observation, where an observation is a
-      whole frame or a 2&times; crop of one. The method has four steps, and each one has a main equation below. Every
-      formula is derived step by step, with worked numbers, in the
-      <a href="static/pdf/derivations_step_by_step.pdf">derivation notes</a>.</p>
+      whole frame or a 2&times; crop of one. The method has four steps, and each one has a main equation below.</p>
 
       <h4>1. Glance at every frame</h4>
       <p>Each frame is encoded once at 224&nbsp;px, and a linear classifier turns it into a <i>vote</i> for each
