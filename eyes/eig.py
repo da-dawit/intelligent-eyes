@@ -4,8 +4,8 @@ If look j would shift the species scores by Delta ~ N(m_j, v_j I), then
 
     EIG(j) = E[ KL(p_new || p) ]  ~=  1/2 ( m_j^T F m_j + v_j tr F ),   F = diag(p) - p p^T
 
-    m_j^T F m_j = Var_{y~p}[ m_j(y) ]   "expected signal"   (Lemma 6.4)
-    v_j tr F    = v_j (1 - sum_y p_y^2)  "surprise"
+    m_j^T F m_j = Var_{y~p}[ m_j(y) ]    expected signal (Lemma 6.4)
+    v_j tr F    = v_j (1 - sum_y p_y^2)  surprise
 
 Both terms vanish as p becomes one-hot, which is the stopping rule (Cor. 7.1).
 """
@@ -17,14 +17,14 @@ from .belief import entropy, softmax
 
 
 def fisher(p: np.ndarray) -> np.ndarray:
-    """F = diag(p) - p p^T: the Hessian of log-sum-exp (Lemma 6.2)."""
+    """F = diag(p) - p p^T, the Hessian of log-sum-exp (Lemma 6.2)."""
     return np.diag(p) - np.outer(p, p)
 
 
 def var_under_p(p: np.ndarray, M: np.ndarray) -> np.ndarray:
     """Delta^T F Delta = Var_{y~p}[Delta(y)], for each row Delta of M (Lemma 6.4).
 
-    Uses O(K) per row instead of forming the K x K matrix F.
+    Costs O(K) per row because it never forms the K x K matrix F.
     """
     mean = M @ p
     return (M ** 2) @ p - mean ** 2
@@ -36,11 +36,11 @@ def trace_fisher(p: np.ndarray) -> float:
 
 
 def eig_closed_form(p: np.ndarray, m: np.ndarray, v: np.ndarray, cap: bool = True) -> np.ndarray:
-    """Closed-form EIG for C candidates (Theorem 6.5).
+    """Closed-form EIG of eq. (3) for C candidates (Theorem 6.5).
 
-    p: (K,) current belief;  m: (C, K) expected score shifts;  v: (C,) their variances.
-    With cap=True the result is clipped at H(p): mutual information can never exceed
-    the current entropy, but the quadratic form can (derivations, 'Limits').
+    p (K,) is the current belief, m (C, K) the expected score shifts and v (C,) their variances.
+    With cap=True the result is clipped at H(p). Mutual information can never be larger than
+    the current entropy, but the quadratic form can be (derivations, 'Limits').
     """
     eig = 0.5 * (var_under_p(p, m) + v * trace_fisher(p))
     if cap:
@@ -56,11 +56,11 @@ def kl(p_new: np.ndarray, p: np.ndarray) -> np.ndarray:
 
 def eig_monte_carlo(s: np.ndarray, m: np.ndarray, v: np.ndarray, n_samples: int = 64,
                     rng: np.random.Generator | None = None) -> tuple[np.ndarray, np.ndarray]:
-    """Exact-KL EIG by Monte Carlo (derivations, 'Limits', (ii)).
+    """EIG with the exact KL, by Monte Carlo (derivations, 'Limits', (ii)).
 
-    s: (K,) current scores (p = softmax(s));  m: (C, K);  v: (C,).
-    Draws Delta^(i) ~ N(m_j, v_j I), averages KL(softmax(s + Delta) || p).
-    Returns (mean, standard error), each (C,).
+    s (K,) is the current scores (p = softmax(s)), m is (C, K) and v is (C,).
+    Draws Delta^(i) ~ N(m_j, v_j I) and averages KL(softmax(s + Delta) || p).
+    Returns the mean and its standard error, each (C,).
     """
     rng = rng or np.random.default_rng(0)
     p = softmax(s)

@@ -3,9 +3,9 @@
     python scripts/summarize.py --dataset iwildcam
 
 Reads results/<dataset>/<run>/seed*/ and writes results/<dataset>/summary.md and
-results/<dataset>/accuracy_vs_passes.png. Thresholds are the ones fixed in the proposal.
-"The eyes" are the two-branch EIG (eyesmix_*) when a run has it, else plain EIG (eyes_*).
---only clip,dinov2-boxes-...  restricts the runs;  --out NAME  writes NAME.md / NAME.png.
+results/<dataset>/accuracy_vs_passes.png. The thresholds are the ones fixed in the proposal.
+"The eyes" means the two-branch EIG (eyesmix_*) when a run has it, else plain EIG (eyes_*).
+--only clip,dinov2-boxes-... restricts the runs. --out NAME writes NAME.md / NAME.png.
 """
 import argparse
 import json

@@ -3,8 +3,8 @@
     python scripts/fetch_boxes.py --out $EYES_DATA/raw/iwildcam_mdv4
 
 The boxes ship inside the 169 GB iWildCam 2022 archive on LILA. A zip keeps its table of
-contents at the end, so HTTP range requests read the table and then only the 82 MB
-detections file -- nothing else is downloaded.
+contents at the end, so HTTP range requests can read the table and then only the 82 MB
+detections file. Nothing else is downloaded.
 """
 import argparse
 import io

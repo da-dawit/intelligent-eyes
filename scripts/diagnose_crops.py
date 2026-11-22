@@ -2,13 +2,14 @@
 
     python scripts/diagnose_crops.py --encoder dinov2 --seed 0
 
-Uses MegaDetector v4 animal boxes (iWildCam 2022 metadata, LILA) ONLY as a measuring stick:
-a crop "contains the animal" if at least half of some animal box (conf >= 0.5) lies inside it.
-Reports, on the test clips:
+Uses MegaDetector v4 animal boxes (iWildCam 2022 metadata, LILA) only to measure in parts 1-3,
+and as training labels in part 4. A crop contains the animal if at least half of some animal
+box (conf >= 0.5) lies inside it. Reports on the test clips:
   1. how often each method's looks land on an animal (from results/<ds>/<enc>/seed<k>/clips.csv.gz)
   2. how good a single crop's vote is on animal crops vs background crops
-  3. All-9 accuracy when background crops are silenced (vote set to 0) -- an oracle gate,
-     i.e. how much a perfect "is the animal in this crop?" test could recover
+  3. All-9 accuracy when background crops are silenced (vote set to 0). This is an oracle gate,
+     so it shows how much a perfect "is the animal in this crop?" test could recover
+  4. a crop classifier with an extra 'empty' class, and accuracy with its votes
 """
 import argparse
 import json
@@ -31,7 +32,8 @@ from eyes.geometry import boxes  # noqa: E402
 
 
 def animal_masks(frames: pd.DataFrame, md_file: Path, conf: float = 0.5, cover: float = 0.5):
-    """(N, 9) bool: crop k holds >= `cover` of some animal box; (N,) bool: frame has a box; (N,) covered by MD."""
+    """Three bool masks. in_crop (N, 9) if crop k holds >= `cover` of some animal box,
+    has_box (N,) if the frame has a box, covered (N,) if MD has the frame at all."""
     md = json.load(open(md_file))
     by_name = {im["file"].split("/")[-1]: im for im in md["images"]}
     crops = boxes()[1:]                                                    # (9, 4) x0 y0 x1 y1
@@ -67,7 +69,7 @@ def main():
     print(f"MD covers {covered.mean():.1%} of frames; {has_box.mean():.1%} have an animal box; "
           f"crops holding an animal: {in_crop[has_box].mean():.1%} of crops in those frames")
 
-    # ---- 1. where do the looks land? (saved results)
+    # 1. where do the looks land? (saved results)
     res = pd.read_csv(paths.RESULTS / args.dataset / args.encoder / f"seed{args.seed}" / "clips.csv.gz")
     rows_of = {cid: idx for cid, idx in frames.groupby("clip_id").indices.items()}
     order = {cid: np.sort(idx) for cid, idx in rows_of.items()}
@@ -89,7 +91,7 @@ def main():
     base = in_crop[has_box].mean()
     print(f"   {'any crop':14s} {base:6.1%}  (chance)")
 
-    # ---- refit the classifiers exactly as run_eval does for this seed
+    # refit the classifiers the same way run_eval does for this seed
     rng = np.random.default_rng(args.seed)
     frames["ok"] = feats["ok"].astype(bool)
     keep = frames.groupby("clip_id")["ok"].transform("all").values
@@ -118,7 +120,7 @@ def main():
     probe_g.temperature = fit_temperature(probe_g.logits(feats["g"][hr]), hy)
     probe_c.temperature = fit_temperature(probe_c.logits(feats["crops"][hr].reshape(-1, D)), np.repeat(hy, 9))
 
-    # ---- 2. single-crop votes: animal crops vs background crops (test frames with a box)
+    # 2. single-crop votes on animal crops vs background crops (test frames with a box)
     tr = test_df["row"].values
     v = votes_for(tr, feats, probe_g, probe_c, log_prior)                          # (N, 10, K)
     y = test_df["label"].values
@@ -131,7 +133,7 @@ def main():
     print(f"   crop with the animal  top-1 {top[m_box][m_in[m_box]].mean():6.1%}   true-class vote advantage {adv[m_box][m_in[m_box]].mean():+.2f}")
     print(f"   background crop       top-1 {top[m_box][~m_in[m_box]].mean():6.1%}   true-class vote advantage {adv[m_box][~m_in[m_box]].mean():+.2f}")
 
-    # ---- 3. All-9 with background crops silenced (oracle gate), same R as run_eval
+    # 3. All-9 with background crops silenced (oracle gate), same R as run_eval
     votes_h = votes_for(hr, feats, probe_g, probe_c, log_prior)
     resid = class_conditional_residuals(votes_h, hy, K)
     A_fit = fit_A(resid)
@@ -149,14 +151,14 @@ def main():
         acc = np.mean([run(c, model, rule="all" if rule == "all" else "eig", budget=0).pred == c.label for c in clips])
         print(f"   {name:20s} {acc:6.1%}")
 
-    # ---- 4. the fix: crop classifier with an 'empty' class, labels from boxes (training data only)
-    #      vote  l(y) = log( q(y|c) / pi(y) + q(empty|c) )
+    # 4. crop classifier with an 'empty' class, labels from boxes (training data only)
+    #    vote  l(y) = log( q(y|c) / pi(y) + q(empty|c) )
     fit_idx = fit_df.index.values
     lab = np.full((len(fit_idx), 9), -2)                                  # -2: not used
     box = has_box[fit_idx]
     lab[box] = np.where(in_crop[fit_idx][box], fit_df["label"].values[box, None], -2)
     lab[box & ~in_crop[fit_idx].any(1)] = -2
-    # background: crops of boxed frames that hold no part of a box, and every crop of 'empty' frames
+    # background crops are the crops of boxed frames that hold no part of a box, plus every crop of 'empty' frames
     free = crop_free_of_boxes(frames.iloc[fit_idx], Path(args.md))
     lab[box[:, None] & free] = K
     lab[fit_df["y_frame"].values == 0] = K

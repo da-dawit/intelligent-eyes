@@ -1,15 +1,15 @@
-"""Build the project page: docs/project_page/index.html, its figures, and (with make_videos.py) its videos.
+"""Build the project page docs/project_page/index.html, its figures, and (with make_videos.py) its videos.
 
     python scripts/make_project_page.py --final-dump final.pkl
 
-Layout and styles follow the Nerfies project page (CC BY-SA 4.0, credited in the footer); all
-files are local, so the page also works offline. Numbers come from results/iwildcam/: the
-method as proposed (<encoder>) and the final method (<encoder>-boxes-preview-gated-tau).
-MegaDetector boxes are used only to measure where looks land; the method never sees them.
-Figures are drawn at the size they are shown (10 in = the 960 px page column) in a plain
-paper style; their explanations are in the HTML captions. The benchmark tables also read the
-ablation runs, results/ddr/ and results/synthetic/summary.md, and the midpoint memo and derivation PDFs
-are copied next to the page, so docs/project_page/ is a complete site (GitHub Pages serves docs/ from main).
+Layout and styles follow the Nerfies project page (CC BY-SA 4.0, credited in the footer). All files
+are local, so the page also works offline. Numbers come from results/iwildcam/, for the method as
+proposed (<encoder>) and the final method (<encoder>-boxes-preview-gated-tau). MegaDetector boxes are
+used only to measure where looks land. The method never sees them.
+Figures are drawn at the size they are shown (10 in = the 960 px page column) in a plain paper style,
+and the HTML captions explain them. The benchmark tables also read the ablation runs, results/ddr/ and
+results/synthetic/summary.md. The midpoint memo and derivation PDFs are copied next to the page, so
+docs/project_page/ is a complete site (GitHub Pages serves docs/ from main).
 """
 import argparse
 import pickle
@@ -43,7 +43,6 @@ plt.rcParams.update({
     "savefig.pad_inches": 0.04})
 
 
-# ------------------------------------------------------------------ numbers
 def seeds(run_name, dataset="iwildcam"):
     return sorted((paths.RESULTS / dataset / run_name).glob("seed*/clips.csv.gz"))
 
@@ -58,7 +57,7 @@ def acc(r, m):
 
 
 def acc_seeds(r, m):
-    """Accuracy (%) per seed (random looks: averaged over draws first)."""
+    """Accuracy (%) per seed. For random looks this also averages over the draws."""
     x = r[r.method == m]
     return 100 * x.groupby("seed").correct.mean().values
 
@@ -83,8 +82,10 @@ def numbers():
 
 
 def look_hits(frames, encoders=("dinov2",)):
-    """Per encoder: share of 2 looks (3 seeds) on a crop holding the animal, among crops that clearly
-    hold it or clearly don't (eyes/boxes.py: crop_labels). Boxes are used only to measure this."""
+    """Share of the 2 looks (3 seeds) that land on a crop holding the animal, per encoder.
+
+    Only crops that clearly hold the animal or clearly don't are counted (crop_labels in eyes/boxes.py).
+    The boxes are used only to measure this."""
     content = crop_labels(frames, load_detections(paths.DATA / "raw" / "iwildcam_mdv4" / "iwildcam2022_mdv4_detections.json"))
     rows_of = {cid: np.sort(idx) for cid, idx in frames.groupby("clip_id").indices.items()}
 
@@ -111,17 +112,18 @@ def look_hits(frames, encoders=("dinov2",)):
     return out
 
 
-# Each row adds one change to the row above (README, "Changes from the proposal"): label, run, rule.
+# Each row adds one change to the row above (README, "Changes from the proposal").
+# Entries are (label, run suffix, rule).
 LADDER = [("As proposed", "", "eyes"),
           ("+ empty class for crops (change 2)", "-boxes", "eyes"),
           ("+ look predictor starts from a guess (6)", "-boxes-preview", "eyes"),
           ("+ gated fusion (3)", "-boxes-preview-gated", "eyes"),
           ("+ two-branch EIG (5)", "-boxes-preview-gated", "eyesmix"),
-          ("+ shared crop error &tau; in <i>R</i> (4): final", FINAL, "eyesmix")]
+          ("+ shared crop error &tau; in <i>R</i> (4), final", FINAL, "eyesmix")]
 
 
 def ladder():
-    """Accuracy with 2 looks and with all crops after each change; None where a run lacks 3 seeds."""
+    """Accuracy with 2 looks and with all crops after each change. None where a run has fewer than 3 seeds."""
     out = {}
     for enc, _ in ENCODERS:
         for i, (_, suffix, rule) in enumerate(LADDER):
@@ -143,7 +145,7 @@ DDR_METHODS = [("glance", "Glance", "1"), ("random_b2", "Random looks", "3"), ("
 
 
 def ddr():
-    """DDR (one photo per clip, grades 0-4): accuracy and quadratic kappa per method, method as proposed."""
+    """Accuracy and quadratic kappa per method on DDR (one photo per clip, grades 0-4), method as proposed."""
     out = {}
     for enc, _ in ENCODERS:
         if len(seeds(enc, "ddr")) < 3:
@@ -167,9 +169,9 @@ def md_table(text, first_header):
 
 
 def synthetic():
-    """results/synthetic/summary.md (scripts/synthetic_study.py): looks budget, shrinkage sweep, All-9."""
+    """Looks budget, shrinkage sweep and All-9 from results/synthetic/summary.md (scripts/synthetic_study.py)."""
     text = (paths.RESULTS / "synthetic" / "summary.md").read_text()
-    def pm(cell):                                                       # "74.1 ± 1.4" -> (74.1, 1.4)
+    def pm(cell):                                                       # "74.1 +- 1.4" -> (74.1, 1.4)
         return tuple(float(x) for x in cell.split("\u00b1"))
     looks = [(int(r[0]), *pm(r[2]), *pm(r[3])) for r in md_table(text, "looks")]
     lam = [(float(r[0]), float(r[3]), float(r[5])) for r in md_table(text, "lam")]
@@ -178,7 +180,6 @@ def synthetic():
     return dict(looks=looks, lam=lam, all9=all9, all9_passes=all9_passes, chosen=chosen)
 
 
-# ------------------------------------------------------------------ figures
 def letter(ax, ch, x=-0.02, y=1.0):
     """Bold panel letter in the top-left corner, outside the axes (as in journal figures)."""
     ax.text(x, y, ch, transform=ax.transAxes, ha="right", va="bottom", fontsize=14, fontweight="bold")
@@ -208,7 +209,7 @@ def fig_curves(data, out):
 
 
 def fig_diagnosis(hits, out):
-    """a: the crop classifier alone (scripts/diagnose_crops.py, DINOv2 seed 0); b: where 2 looks land."""
+    """Panel a is the crop classifier alone (scripts/diagnose_crops.py, DINOv2 seed 0), panel b where 2 looks land."""
     fig, (a, b) = plt.subplots(1, 2, figsize=(10, 2.5), layout="constrained", gridspec_kw={"width_ratios": [1, 1.7]})
     a.bar([0, 1], [42.9, 85.5], width=0.55, color=[C_FIRST, C_FINAL])
     a.axhline(62.5, color=C_REF, ls="--", lw=1, label="glance, whole frame")
@@ -237,7 +238,7 @@ def fig_diagnosis(hits, out):
 
 
 def fig_synthetic(syn, out):
-    """a: accuracy against looks on synthetic clips with a known R; b: against the shrinkage of A."""
+    """Synthetic clips with a known R. Panel a is accuracy against looks, panel b against the shrinkage of A."""
     fig, (a, b) = plt.subplots(1, 2, figsize=(10, 2.55), layout="constrained")
     L = np.array(syn["looks"])                                          # looks, eyes mean, sd, random mean, sd
     a.errorbar(L[:, 0], L[:, 3], yerr=L[:, 4], color=C_RANDOM, marker="s", capsize=2, ms=4.5)
@@ -266,7 +267,8 @@ def fig_synthetic(syn, out):
 
 
 def fig_method(dump, frames, out, clip_id=None):
-    """a: the glance frames, b: P(animal) per crop, c: the selected crop at 2x, d: the posterior."""
+    """Method figure. Panels are (a) the glance frames, (b) P(animal) per crop, (c) the selected crop at 2x
+    and (d) the posterior."""
     D = pickle.load(open(dump, "rb"))
     cats = pd.read_csv(paths.DATA / "raw" / "iwildcam_v2.0" / "categories.csv")
     name_of = dict(zip(cats["y"], cats["name"]))
@@ -328,7 +330,6 @@ def fig_method(dump, frames, out, clip_id=None):
     plt.close(fig)
 
 
-# ------------------------------------------------------------------ page
 def fmt(v):
     return "&ndash;" if v is None else f"{v:.1f}"
 
@@ -412,7 +413,7 @@ def ddr_html(d):
 
 
 def video_rows(video_dir, name):
-    """Rows of a list written by make_videos.py (tab-separated; the page shows the videos in this order)."""
+    """Rows of a tab-separated list written by make_videos.py. The page shows the videos in this order."""
     path = video_dir / name
     return [line.split("\t") for line in path.read_text().splitlines() if line] if path.exists() else []
 
@@ -424,7 +425,7 @@ def video_tag(rel):
 
 
 def who(names, right):
-    """'Correct: a, b. Wrong: c.' from a list of names and a '1,0,...' string."""
+    """Caption text 'Correct: a, b. Wrong: c.' from the panel names and a '1,0,...' string."""
     ok = [n for n, r in zip(names, right.split(",")) if r == "1"]
     bad = [n for n, r in zip(names, right.split(",")) if r != "1"]
     return " ".join(part for part in (f"Correct: {', '.join(ok)}." if ok else "", f"Wrong: {', '.join(bad)}." if bad else "") if part)
@@ -442,7 +443,7 @@ def tabbed(items):
 
 
 def grid_items(video_dir, name, num):
-    """Baseline or encoder grids: file, species, frames, correct per panel, panel names."""
+    """Clip tabs for the baseline or encoder grids. Rows are file, species, frames, correct per panel, panel names."""
     items = []
     for file, species, T, right, panels in video_rows(video_dir, name):
         items.append((f"<i>{species}</i>", f"""
@@ -455,34 +456,34 @@ def grid_items(video_dir, name, num):
 
 
 def gallery_items(video_dir, num):
-    """Stopping-rule cards: file, species, frames, looks, correct, predicted."""
+    """Clip tabs for the stopping-rule cards. Rows are file, species, frames, looks, correct, predicted."""
     items = []
     for file, species, T, looks, ok, pred in video_rows(video_dir, "gallery.txt"):
         n = int(looks)
         result = ('<span class="verdict pass"><i class="fas fa-check"></i> correct</span>' if ok == "1" else
                   '<span class="verdict fail"><i class="fas fa-times"></i> wrong</span>')
         if ok != "1":
-            result += f" (predicted <i>{pred}</i>)"
+            result += f" (it says <i>{pred}</i>)"
         label = f"<i>{species}</i>" + ("" if ok == "1" else ' <span class="tab-note">wrong</span>')
         items.append((label, f"""
     <div class="video-block card-block">
       {video_tag(f"static/videos/{file}")}
-      <p class="caption"><b>Video {num[0]}.</b> <i>{species}</i>, {T} frames, {n} look{'' if n == 1 else 's'}:
-      {result}</p>
+      <p class="caption"><b>Video {num[0]}.</b> <i>{species}</i>, {T} frames and {n} look{'' if n == 1 else 's'}.
+      The prediction is {result}.</p>
     </div>"""))
         num[0] += 1
     return tabbed(items)
 
 
 def compare_items(video_dir, num):
-    """The side-by-side videos (as proposed | final): file, species, frames."""
+    """Clip tabs for the side-by-side videos (as proposed | final). Rows are file, species, frames."""
     items = []
     for file, species, T in video_rows(video_dir, "videos.txt"):
         items.append((f"<i>{species}</i>", f"""
     <div class="video-block">
       {video_tag(f"static/videos/{file}")}
-      <p class="caption"><b>Video {num[0]}.</b> <i>{species}</i>, {T} frames. Left: method as proposed (orange);
-      right: final method (blue).</p>
+      <p class="caption"><b>Video {num[0]}.</b> <i>{species}</i>, {T} frames. The method as proposed is on the left
+      (orange) and the final method is on the right (blue).</p>
     </div>"""))
         num[0] += 1
     return tabbed(items)

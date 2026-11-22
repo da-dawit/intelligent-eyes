@@ -2,14 +2,14 @@
 
     python scripts/run_eval.py --dataset iwildcam --encoder dinov2 --seeds 0 1 2
 
-Per seed (the seed sets the camera split, classifier training, MC samples, random looks):
-  1. split training cameras 90 / 10: classifiers learn on the 90, everything else is
-     fitted on the 10 held out (temperatures, look predictor, sigma2, A, rho, lam, eps)
+For each seed (it sets the camera split, classifier training, MC samples and random looks):
+  1. split the training cameras 90 / 10. Classifiers learn on the 90, everything else is
+     fitted on the held-out 10 (temperatures, look predictor, sigma2, A, rho, lam, eps)
   2. turn every cached view into a vote  l = log q - log pi
   3. run each method on every test clip and record the outcome per clip
-  4. score every pair of looks of every test clip: metric 4 and the best-pair reference
-B1 (every frame at 2x resolution) runs when a high-res cache exists (<encoder>_hr): its own
-probe, temperature and rho, frames combined by eq. (1) with T_rho; counted as 4 passes a frame.
+  4. score every pair of looks of every test clip (metric 4 and the best-pair reference)
+B1 (every frame at 2x resolution) runs when a high-res cache exists (<encoder>_hr). It has its
+own probe, temperature and rho, combines frames by eq. (1) with T_rho, and counts as 4 passes a frame.
 Outputs results/<dataset>/<encoder>/seed<k>/{clips.csv.gz, ranking.csv, pairs.csv.gz, fit.json}.
 """
 import argparse
@@ -56,9 +56,9 @@ def votes_for(rows, feats, probe_g, probe_c, log_prior, log_pi_crop=None, shape=
 
     If the crop classifier has an extra 'empty' class (log_pi_crop given), crop votes are
     the mixture votes log(q(y|c)/pi(y) + q(empty|c)) of eyes/boxes.py, shaped by
-    (eps, gain): pi is softened to (1 - eps) pi + eps / K, so that a little probability
-    leaking onto a rare species is not multiplied by 1 / pi(y), and the votes are scaled by
-    `gain`. Both are fitted on held-out cameras (choose_vote_shape).
+    (eps, gain). pi is softened to (1 - eps) pi + eps / K, so a little probability leaking
+    onto a rare species is not multiplied by 1 / pi(y). Then the votes are scaled by `gain`.
+    Both are fitted on held-out cameras (choose_vote_shape).
     """
     N = len(rows)
     D = feats["g"].shape[1]
@@ -74,7 +74,7 @@ def votes_for(rows, feats, probe_g, probe_c, log_prior, log_pi_crop=None, shape=
 
 
 def crop_gate(rows, feats, probe_c, K):
-    """(N, 9) bool, gated fusion: once a look is taken, its own crop classifier decides whether
+    """(N, 9) bool for gated fusion. Once a look is taken, its own crop classifier decides whether
     it shows the animal (q(empty | crop) < 1/2). Looks that show only background stay out of eq. (1)."""
     D = feats["g"].shape[1]
     lq = probe_c.log_probs(feats["crops"][rows].reshape(-1, D)).reshape(len(rows), 9, K + 1)
@@ -106,8 +106,8 @@ def choose_vote_shape(held_df, feats, probe_g, probe_c, log_prior, log_pi_crop, 
 
 
 def where_features(frames, feats):
-    """(N, 9, F) cheap 'where is something' cues per crop, from the glance and thumbnails only:
-    log motion (B4's score) and, when cached, the share of the glance's CLS attention (B3's)."""
+    """(N, 9, F) cheap cues for where something is in each crop, from the glance and thumbnails only.
+    Log motion (B4's score) and, when cached, the share of the glance's CLS attention (B3's)."""
     motion = np.zeros((len(frames), 9), np.float32)
     for _, idx in frames.groupby("clip_id").indices.items():
         idx = np.sort(idx)
@@ -119,13 +119,13 @@ def where_features(frames, feats):
 
 
 def predictor_inputs(rows, feats, preview=None):
-    """[u_bar_fk ; g_f] for the 9 crops of each frame -> (N * 9, 2D).
+    """[u_bar_fk ; g_f] for the 9 crops of each frame -> (N * 9, 2D), or (N * 9, 2D + K) with a preview.
 
     preview: optional (probe_u, log_pi_crop, where). probe_u classifies a crop's preview
-    u_bar_fk (the glance's own tokens over that crop, plus the `where` cues if given: a
-    row-indexed (N_all, 9, F) array) as species or 'empty', trained on the same box labels as
-    the crop classifier; its mixture vote -- the look's vote as guessed from the glance alone --
-    is appended, so the ridge of eq. (2) only has to correct it.
+    u_bar_fk (the glance's own tokens over that crop, plus the `where` cues if given, a
+    row-indexed (N_all, 9, F) array) as species or 'empty'. It is trained on the same box labels
+    as the crop classifier. Its mixture vote is the look's vote guessed from the glance alone.
+    That vote is appended, so the ridge of eq. (2) only has to correct it.
     """
     u = feats["ubar"][rows].astype(np.float32)
     g = np.repeat(feats["g"][rows].astype(np.float32)[:, None], 9, axis=1)
@@ -140,9 +140,9 @@ def predictor_inputs(rows, feats, preview=None):
 
 
 def animal_branch(rows, feats, preview, shape, probe_w=None):
-    """From the glance preview: P(crop shows the animal) (N, 9) and the vote it would give if
-    it does (N, 9, K), shaped like the real crop votes (eig_mix). probe_w: optional binary
-    'is the animal in this crop?' classifier on u_bar, used for P(animal) when given."""
+    """P(crop shows the animal) (N, 9) and the vote it would give if it does (N, 9, K), both from
+    the glance preview and shaped like the real crop votes (eig_mix). probe_w is an optional binary
+    'is the animal in this crop?' classifier on u_bar. When given, it is used for P(animal)."""
     probe_u, log_pi_crop, where = preview
     u = feats["ubar"][rows].astype(np.float32)
     x = u if where is None else np.concatenate([u, where[rows]], axis=2)
@@ -212,7 +212,7 @@ def run_seed(frames, feats, hires, seed, out_dir, args, content=None):
     test_df = test_all[test_all["label"] >= 0]
     fit_df = frames.loc[fit_df.index]
 
-    # ---- classifiers (glance, crop) on the 90%
+    # classifiers (glance, crop) on the 90%
     counts = np.bincount(fit_df["label"], minlength=K)
     log_prior = np.log(counts / counts.sum())
     D = feats["g"].shape[1]
@@ -230,7 +230,7 @@ def run_seed(frames, feats, hires, seed, out_dir, args, content=None):
         use = rng.choice(use, args.max_crop_rows, replace=False)
     probe_c = train_probe(Xc[use].astype(np.float32), yc[use], n_out, seed=seed)
 
-    # ---- temperatures on held-out cameras (A3)
+    # temperatures on held-out cameras (A3)
     hr = held_df["row"].values
     hy = held_df["label"].values
     probe_g.temperature = fit_temperature(probe_g.logits(feats["g"][hr]), hy)
@@ -241,14 +241,14 @@ def run_seed(frames, feats, hires, seed, out_dir, args, content=None):
     acc_g = float(np.mean(probe_g.logits(feats["g"][hr]).argmax(1) == hy))
     acc_c = float(np.mean(lc_h[ok_c].argmax(1) == yh_c[ok_c]))
 
-    # ---- gated fusion: a look enters eq. (1) only if its crop shows the animal
+    # gated fusion, where a look enters eq. (1) only if its crop shows the animal
     gate_h = None
     if args.fusion == "gated":
         if content is None:
             raise SystemExit("--fusion gated needs --crop-labels boxes")
         gate_h = crop_gate(hr, feats, probe_c, K)
 
-    # ---- votes, look predictor (eq. 2) on held-out
+    # votes and the look predictor (eq. 2) on held-out
     shape, shape_table = (0.0, 1.0), {}
     if content is not None and args.vote_shape == "fit":
         shape, shape_table = choose_vote_shape(held_df, feats, probe_g, probe_c, log_prior, log_pi_crop, seed,
@@ -275,7 +275,7 @@ def run_seed(frames, feats, hires, seed, out_dir, args, content=None):
     mu_h = np.zeros_like(votes_h)
     mu_h[:, 1:] = out_of_fold(Xh, Yh, groups, pred.lam, seed=seed).reshape(len(hr), 9, K)
 
-    # ---- repetition R = T_rho (x) A_lam on held-out (eq. 1)
+    # repetition R = T_rho (x) A_lam on held-out (eq. 1)
     mask_h = gate_mask(gate_h)
     resid = class_conditional_residuals(votes_h, hy, K, mask_h)
     A_fit = fit_A(resid, mask_h)
@@ -307,7 +307,7 @@ def run_seed(frames, feats, hires, seed, out_dir, args, content=None):
     if preview is not None:
         eps_mix, _ = choose_eps(held_clips, model, budget=max(BUDGETS), seed=seed, rule="eig_mix")
 
-    # ---- B1: the whole frame at 2x resolution, its own probe / temperature / rho
+    # B1 is the whole frame at 2x resolution, with its own probe, temperature and rho
     if hires is not None:
         probe_h = train_probe(hires[fit_df["row"].values].astype(np.float32), fit_df["label"].values, K, seed=seed)
         probe_h.temperature = fit_temperature(probe_h.logits(hires[hr]), hy)
@@ -318,7 +318,7 @@ def run_seed(frames, feats, hires, seed, out_dir, args, content=None):
     print(f"  seed {seed}: fitted in {time.time() - t0:.0f}s  K={K} rho={rho:.3f} lam={lam} "
           f"sigma2={pred.sigma2:.3f} eps={eps} T_g={probe_g.temperature:.2f} T_c={probe_c.temperature:.2f}", flush=True)
 
-    # ---- test clips
+    # test clips
     tr = test_df["row"].values
     votes_t = votes_for(tr, feats, probe_g, probe_c, log_prior, log_pi_crop, shape)
     mu_t = np.zeros_like(votes_t)
@@ -366,7 +366,7 @@ def run_seed(frames, feats, hires, seed, out_dir, args, content=None):
                              ";".join(f"{f}-{k}" for f, k in o.looks), o.stopped))
         print(f"    {name:18s} {time.time() - t1:6.1f}s", flush=True)
 
-    # ---- metric 4 + best-pair reference: every pair of looks, from the glance state
+    # metric 4 and the best-pair reference, over every pair of looks from the glance state
     t1, pr = time.time(), []
     for c in clips:
         r = pair_report(c, model, eyes_looks[c.clip_id])
@@ -388,7 +388,7 @@ def run_seed(frames, feats, hires, seed, out_dir, args, content=None):
     res = pd.DataFrame(rows, columns=["method", "draw", "clip_id", "camera", "T", "label", "pred", "correct",
                                       "conf", "p_true", "passes", "looks", "stopped"])
 
-    # ---- metric 5: does predicted EIG rank looks like their realised effect?
+    # metric 5, does predicted EIG rank the looks in the same order as their realised effect?
     rk = []
     for c in clips[: args.ranking_clips]:
         o = run(c, model, "eig", budget=1, record_first=True, rng=np.random.default_rng(seed))
@@ -435,7 +435,7 @@ def main():
     ap.add_argument("--vote-shape", choices=["fit", "none"], default="fit",
                     help="with --crop-labels boxes: fit the prior softening and gain of crop votes on held-out")
     ap.add_argument("--predictor", choices=["ridge", "preview", "preview_where"], default="ridge",
-                    help="preview: add the glance-preview classifier's guess of the vote to eq. (2); "
+                    help="preview: add the glance-preview classifier's guess of the vote to eq. (2). "
                          "preview_where: the preview classifier also sees motion and attention cues")
     ap.add_argument("--md", default=str(paths.DATA / "raw" / "iwildcam_mdv4" / "iwildcam2022_mdv4_detections.json"))
     args = ap.parse_args()

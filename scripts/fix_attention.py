@@ -3,8 +3,8 @@
     python scripts/fix_attention.py --frames ... --images ... --encoder dinov3 --out attn_dinov3.npy
     python scripts/fix_attention.py --frames ... --apply attn_dinov3.npy --feature-dir .../features/iwildcam/dinov3
 
-The first form runs the glances through the encoder's eager copy (float32) and saves the
-(N, 9) attention shares; the second writes them into every chunk of a cache, in place.
+The first form runs the glances through the encoder's eager copy in float32 and saves the
+(N, 9) attention shares. The second writes them into every chunk of a cache, in place.
 Used once, after float16 eager attention turned DINOv3's maps into NaN.
 """
 import argparse

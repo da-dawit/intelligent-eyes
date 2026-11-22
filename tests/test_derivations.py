@@ -1,4 +1,4 @@
-"""Each test checks one numbered result of derivations.pdf against the code."""
+"""Checks of the numbered results of derivations.pdf against the code, plus a few fitting helpers."""
 import numpy as np
 import pytest
 
@@ -12,7 +12,7 @@ from eyes.predictor import condition_on_looks, fit_ridge
 rng = np.random.default_rng(0)
 
 
-# ---------------------------------------------------------------- Sec. 3: eq. (1)
+# Sec. 3: eq. (1)
 
 def test_two_votes_weight_one_over_one_plus_r():
     """Example after Prop. 3.1: w = 1/(1+r) each, n_eff = 2/(1+r)."""
@@ -58,10 +58,10 @@ def test_overlap_table_is_a_correlation_matrix():
 
 
 def test_overlap_table_is_singular_because_corners_tile_the_frame():
-    """Found before real data: the 4 corner crops tile the frame, so the glance is a linear
-    combination of them and A has a zero eigenvalue; w = A^{-1} 1 then ignores the centre crop.
-    Shrinking A toward I (correlation.shrink) makes it well conditioned and gives the centre
-    crop its weight back."""
+    """Found on synthetic data before the real runs. The 4 corner crops tile the frame, so the
+    glance is a linear combination of them and A has a zero eigenvalue. Then w = A^{-1} 1 ignores
+    the centre crop. Shrinking A toward I (correlation.shrink) makes it well conditioned and
+    gives the centre crop its weight back."""
     A = overlap_correlation()
     assert np.linalg.eigvalsh(A).min() < 1e-10
     w = evidence_weights(A[1:, 1:], ridge=0).reshape(3, 3)
@@ -106,7 +106,7 @@ def test_class_conditional_residuals_remove_species_means():
     np.testing.assert_allclose(r.sum(axis=2), 0, atol=1e-10)
 
 
-# ---------------------------------------------------------------- Sec. 4: adding one look
+# Sec. 4: adding one look
 
 def test_block_inverse_update_matches_recomputation():
     """Prop. 4.1: E_{S+j} - E_S = c_j (l_j - R_jS R_SS^{-1} l_S)."""
@@ -131,7 +131,7 @@ def test_one_earlier_look_gives_c_one_over_one_plus_r():
     assert s[0] == pytest.approx(1 - r ** 2)
 
 
-# ---------------------------------------------------------------- Sec. 5: eq. (2)
+# Sec. 5: eq. (2)
 
 def test_conditioning_matches_empirical_regression():
     """Prop. 5.1, checked by sampling: E[l_j | l_L] and Var[l_j | l_L]."""
@@ -159,7 +159,7 @@ def test_ridge_recovers_a_linear_map():
     assert pred.sigma2 == pytest.approx(0.01, rel=0.2)
 
 
-# ---------------------------------------------------------------- Sec. 6: eq. (3)
+# Sec. 6: eq. (3)
 
 def test_softmax_curvature_and_variance_identity():
     """Lemmas 6.2 and 6.4."""
@@ -194,7 +194,7 @@ def test_two_species_worked_example():
 
 
 def test_closed_form_converges_to_monte_carlo_as_shifts_shrink():
-    """Theorem 6.5 is second order: its relative error should fall roughly in proportion to the shift."""
+    """Theorem 6.5 is second order, so its relative error should fall about in proportion to the shift."""
     s = rng.normal(size=8)
     m0 = rng.normal(size=(6, 8))
     errors = []

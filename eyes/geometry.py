@@ -1,12 +1,12 @@
 """Where the eyes can look.
 
-Every frame has 10 *positions*:
-    k = 0      the glance: the whole frame at 224 px
-    k = 1..9   the looks: a 3x3 grid of crops, each half the frame's side (2x zoom)
+Every frame has 10 positions.
+    k = 0      the glance, the whole frame at 224 px
+    k = 1..9   the looks, a 3x3 grid of crops with half the frame's side (2x zoom)
 
 Crops start at 0, 1/4 and 1/2 of the side, so neighbouring crops overlap by half.
-Frames are stored at 448x448, so a crop is an exact 224x224 slice and the glance is
-the 448 image downsampled to 224: the zoom is a true 2x with no extra resampling.
+Frames are stored at 448x448, so a crop is an exact 224x224 slice and the glance is the
+448 image downsampled to 224. The zoom is a true 2x with no extra resampling.
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ VIEW = 224            # encoder input size (pixels)
 def boxes() -> np.ndarray:
     """(10, 4) array of boxes (x0, y0, x1, y1) in [0, 1] frame coordinates.
 
-    Row 0 is the glance; rows 1..9 are the crops in reading order
+    Row 0 is the glance. Rows 1..9 are the crops in reading order
     (top-left, top-middle, ..., bottom-right).
     """
     out = [(0.0, 0.0, 1.0, 1.0)]
@@ -47,14 +47,14 @@ def pixel_slices(base: int = BASE):
 def overlap_correlation() -> np.ndarray:
     """Geometric repetition table A (10 x 10) from how much two positions overlap.
 
-        A[k, k'] = |box_k  ∩  box_k'| / sqrt(|box_k| |box_k'|)
+        A[k, k'] = |box_k intersect box_k'| / sqrt(|box_k| |box_k'|)
 
-    This is the cosine similarity between the two regions' indicator functions, so A
-    is a Gram matrix of unit vectors: symmetric, positive semidefinite, ones on the
-    diagonal -- a valid correlation matrix. Examples: glance vs crop = 0.5, side
-    neighbours = 0.5, diagonal neighbours = 0.25, crops two apart = 0.
+    This is the cosine similarity between the indicator functions of the two regions, so A
+    is a Gram matrix of unit vectors. That makes it symmetric and positive semidefinite with
+    ones on the diagonal, so it is a valid correlation matrix. Some values are glance vs
+    crop 0.5, side neighbours 0.5, diagonal neighbours 0.25 and crops two apart 0.
 
-    This is the fallback for R (proposal, risk table: "R from crop overlap only").
+    It is the fallback for R in the proposal's risk table ("R from crop overlap only").
     """
     b = boxes()
     area = (b[:, 2] - b[:, 0]) * (b[:, 3] - b[:, 1])
@@ -64,7 +64,7 @@ def overlap_correlation() -> np.ndarray:
 
 
 def token_masks(grid: int) -> np.ndarray:
-    """(9, grid, grid) boolean masks: which glance patch tokens fall inside each crop.
+    """(9, grid, grid) bool masks of which glance patch tokens fall inside each crop.
 
     A token belongs to a crop if its centre lies inside the crop's box. Averaging the
     glance's patch tokens under mask k gives u_bar[f, k], the cheap low-resolution

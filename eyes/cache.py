@@ -5,10 +5,10 @@ import numpy as np
 
 
 def load_features(feat_dir, n_rows: int) -> dict:
-    """Concatenate all chunk_*.npz files -> dict of arrays with n_rows rows.
+    """Join all chunk_*.npz files into one dict of arrays with n_rows rows each.
 
-    Keys: g (N, D), crops (N, 9, D), ubar (N, 9, D), thumb (N, 48, 48), ok (N,).
-    Raises if caching has not finished.
+    Keys are g (N, D), crops (N, 9, D), ubar (N, 9, D), thumb (N, 48, 48) and ok (N,).
+    Raises an error if caching has not finished.
     """
     files = sorted(Path(feat_dir).glob("chunk_*.npz"))
     if not files:
@@ -16,5 +16,5 @@ def load_features(feat_dir, n_rows: int) -> dict:
     parts = [np.load(f) for f in files]
     out = {k: np.concatenate([p[k] for p in parts]) for k in parts[0].files}
     if len(out["g"]) != n_rows:
-        raise RuntimeError(f"{feat_dir}: {len(out['g'])} cached rows, expected {n_rows} -- caching incomplete")
+        raise RuntimeError(f"{feat_dir}: {len(out['g'])} cached rows, expected {n_rows}. Caching is incomplete.")
     return out

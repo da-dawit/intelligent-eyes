@@ -1,13 +1,14 @@
-"""The eyes: glance at every frame, then take looks where and when they are worth most.
+"""The eyes. Glance at every frame, then take looks where and when they are worth most.
 
-Loop (proposal Fig. 3):
-    1. glance at all T frames, combine the votes with eq. (1)
+The loop (proposal Fig. 3):
+    1. glance at all T frames and combine the votes with eq. (1)
     2. for every candidate look (f, k), predict what it would add (eq. 2 + Prop. 4.1)
-    3. score candidates (EIG by eq. 3, or a baseline rule), take the best one
+    3. score the candidates (EIG by eq. 3, or a baseline rule) and take the best one
     4. stop when the budget is spent or the best EIG falls below eps
 
-Every encoder output is cached, so "taking" a look reads its vote from the cache and
-counts one encoder pass. The same loop runs the baselines: only the scoring rule changes.
+All encoder outputs are cached, so taking a look means reading its vote from the cache and
+counting one encoder pass. The baselines run through the same loop with a different
+scoring rule.
 """
 from __future__ import annotations
 
@@ -26,16 +27,16 @@ from .predictor import condition_on_looks
 class Clip:
     """Everything the controller may read about one clip (all from the cache)."""
     votes: np.ndarray                 # (T, 10, K) vote of every observation
-    mu: np.ndarray                    # (T, 10, K) predicted votes (eq. 2); position 0 unused
+    mu: np.ndarray                    # (T, 10, K) predicted votes (eq. 2), position 0 unused
     label: int = -1
     clip_id: str = ""
     camera: int = -1
     look_scores: dict = field(default_factory=dict)   # name -> (T, 9) scores for B3/B4
     p_animal: np.ndarray | None = None  # (T, 9) P(crop shows the animal), from the glance (eig_mix)
     mu_animal: np.ndarray | None = None # (T, 9, K) predicted vote if it does (eig_mix)
-    gate: np.ndarray | None = None      # (T, 9) bool: once taken, does the crop show the animal?
-                                        # (its own classifier says so). Gated fusion leaves the
-                                        # others out of eq. (1); None = every look enters.
+    gate: np.ndarray | None = None      # (T, 9) bool, True if a taken crop shows the animal
+                                        # (by its own classifier). Gated fusion leaves the other
+                                        # looks out of eq. (1). None means every look enters.
 
     @property
     def T(self) -> int:
@@ -60,7 +61,7 @@ class Model:
 
     @staticmethod
     def independent(log_prior, sigma2, ridge=1e-6) -> "Model":
-        """'Eyes without R': every observation treated as independent (R = I)."""
+        """Eyes without R. Every observation is treated as independent (R = I)."""
         return Model(np.eye(N_POS), 0.0, log_prior, sigma2, ridge)
 
 
@@ -76,7 +77,7 @@ class Outcome:
 
 
 def enters(clip: Clip, i: int) -> bool:
-    """Does observation i enter eq. (1)? Glances always; looks unless gated out as background."""
+    """True if observation i enters eq. (1). Glances always do, looks unless gated out as background."""
     k = i % N_POS
     return clip.gate is None or k == 0 or bool(clip.gate[i // N_POS, k - 1])
 
@@ -90,15 +91,16 @@ def look_indices(T: int) -> list[int]:
 
 
 def candidate_terms(clip: Clip, model: Model, S: list[int], L: list[int], C: list[int], parts: bool = False):
-    """For candidates C given observations S (looks L in S), return
+    """Score shifts of the candidates C given observations S (L = the looks in S).
 
-        s      (K,)    current scores, p = softmax(s)
-        m, v   (C,K),(C,)  mean and variance of each candidate's score shift Delta
-        shift  (C, K)  the *actual* shift each candidate would cause (for evaluation only)
+    Returns
+        s      (K,)          current scores, p = softmax(s)
+        m, v   (C, K), (C,)  mean and variance of each candidate's score shift Delta
+        shift  (C, K)        the actual shift each candidate would cause (only for evaluation)
 
-    parts=True also returns (c, implied, correction): c_j of Prop. 4.1, what S implies about
-    each candidate (a_j^T l_S), and how conditioning on the looks taken moved each
-    prediction (Prop. 5.1) -- what eig_mix needs to score its two branches.
+    parts=True also returns (c, implied, correction), which eig_mix needs for its two
+    branches. These are c_j of Prop. 4.1, what S implies about each candidate (a_j^T l_S),
+    and how conditioning on the taken looks moved each prediction (Prop. 5.1).
     """
     R = model.R(clip.T)
     K = clip.votes.shape[-1]
@@ -121,15 +123,17 @@ def candidate_terms(clip: Clip, model: Model, S: list[int], L: list[int], C: lis
 
 def eig_mixture(p: np.ndarray, c: np.ndarray, implied: np.ndarray, correction: np.ndarray, v: np.ndarray,
                 p_animal: np.ndarray, mu_animal: np.ndarray, gated: bool = False) -> np.ndarray:
-    """EIG of a look whose vote has two branches: the crop shows the animal (probability
-    p_animal, predicted vote mu_animal) or only background (vote 0, eyes/boxes.py).
+    """EIG of a look whose vote has two branches.
+
+    Either the crop shows the animal (probability p_animal, predicted vote mu_animal) or
+    only background (vote 0, see eyes/boxes.py). Then
 
         EIG = p_animal EIG(m_A, v) + (1 - p_animal) EIG(m_B, v)
         m_A = c (mu_animal + correction - implied),   m_B = c (correction - implied)
 
-    The split is exact for the expectation E[KL]; each branch uses the closed form of eq. (3).
-    With gated fusion a background look is left out of eq. (1), so its branch changes nothing:
-    EIG = p_animal EIG(m_A, v).
+    Splitting E[KL] over the two branches is exact. Each branch uses the closed form of eq. (3).
+    With gated fusion a background look is left out of eq. (1), so that branch adds nothing
+    and EIG = p_animal EIG(m_A, v).
     """
     m_a = c[:, None] * (mu_animal + correction - implied)
     eig_a = p_animal * eig_closed_form(p, m_a, v)
@@ -143,12 +147,13 @@ def run(clip: Clip, model: Model, rule: str = "eig", budget: int = 2, eps: float
         n_mc: int = 64, rng: np.random.Generator | None = None, record_first: bool = False) -> Outcome:
     """Glance at every frame, then take up to `budget` looks chosen by `rule`.
 
-    rule: "eig"        closed-form EIG (eq. 3)              -- the eyes
-          "eig_mix"    EIG with an animal / background branch per look (needs clip.p_animal)
-          "eig_mc"     Monte Carlo EIG with exact KL
-          "random"     uniformly random looks               -- B2
-          "score:NAME" highest clip.look_scores[NAME]       -- B3 attention, B4 motion
-          "all"        every look in every frame            -- All-9 reference
+    rule is one of
+        "eig"         closed-form EIG, eq. (3) (the eyes)
+        "eig_mix"     EIG with an animal / background branch per look (needs clip.p_animal)
+        "eig_mc"      Monte Carlo EIG with exact KL
+        "random"      uniformly random looks (B2)
+        "score:NAME"  highest clip.look_scores[NAME] (B3 attention, B4 motion)
+        "all"         every look in every frame (the All-9 reference)
     """
     rng = rng or np.random.default_rng(0)
     T = clip.T

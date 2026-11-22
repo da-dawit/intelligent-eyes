@@ -1,11 +1,11 @@
-"""Frozen ViT-B encoders (never trained). Each returns, for a batch of 224x224 views:
+"""Frozen ViT-B encoders (never trained). For a batch of 224x224 views each one returns
 
     pooled  (B, D)        the image feature the linear classifier reads
     patches (B, n, n, D)  the final patch tokens (used for the glance's crop previews)
 
-CLIP and DINOv2/v3 pool with the CLS token; SigLIP 2 has no CLS token and pools with
-its attention head. CLS and register tokens come first in the sequence, so the patch
-tokens are always the last n*n.
+CLIP and DINOv2/v3 pool with the CLS token. SigLIP 2 has no CLS token and pools with its
+attention head. CLS and register tokens come first in the sequence, so the patch tokens
+are always the last n*n.
 """
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ class FrozenEncoder(torch.nn.Module):
         self.device = device or pick_device()
         self.dtype = dtype if self.device.type != "cpu" else torch.float32
         model = AutoModel.from_pretrained(self.spec.hf_name, dtype=self.dtype)
-        # CLIP and SigLIP checkpoints hold an image and a text tower; keep the image tower.
+        # CLIP and SigLIP checkpoints hold an image and a text tower. Keep the image tower.
         self.model = getattr(model, "vision_model", model).to(self.device).eval()
         self.is_clip = name == "clip"
         proc = AutoImageProcessor.from_pretrained(self.spec.hf_name)
@@ -62,12 +62,12 @@ class FrozenEncoder(torch.nn.Module):
 
     @torch.no_grad()
     def cls_attention(self, x: torch.Tensor) -> torch.Tensor:
-        """Last-layer attention from the CLS token to each patch, averaged over heads: (B, n, n).
+        """(B, n, n) last-layer attention from the CLS token to each patch, averaged over heads.
 
-        For baseline B3 ("look where the model attends"). Attention maps are only returned by
-        the slower 'eager' implementation, so a second eager copy runs on glances only.
-        That copy runs in float32: DINOv3's large activations overflow the eager attention
-        in float16 and every map comes out NaN. SigLIP 2 has no CLS token and is not supported.
+        Used by baseline B3, which looks where the model attends. Only the slower 'eager'
+        implementation returns attention maps, so a second eager copy runs on the glances only.
+        That copy runs in float32 because DINOv3's large activations overflow eager attention
+        in float16 and every map comes out NaN. SigLIP 2 has no CLS token, so it is not supported.
         """
         if self.name == "siglip2":
             raise ValueError("SigLIP 2 has no CLS token")
@@ -82,11 +82,12 @@ class FrozenEncoder(torch.nn.Module):
 
     @torch.no_grad()
     def forward(self, x: torch.Tensor):
-        """x: (B, 3, H, H) floats in [0, 1] on self.device.
+        """Encode x, a (B, 3, H, H) float tensor in [0, 1] on self.device.
 
-        H = 224 for the glance and the looks. H = 448 is baseline B1 (the whole frame at 2x
-        resolution, 4x the tokens): the position embeddings are interpolated to the larger
-        grid (DINOv2 does this by itself, CLIP and SigLIP are told to, DINOv3 uses RoPE).
+        H = 224 for the glance and the looks. H = 448 is baseline B1, the whole frame at 2x
+        resolution with 4x the tokens. For that the position embeddings are interpolated to
+        the larger grid. DINOv2 does this by itself, CLIP and SigLIP are told to, and DINOv3
+        uses RoPE.
         """
         x = ((x - self.mean) / self.std).to(self.dtype)
         resize = x.shape[-1] != VIEW and self.name in ("clip", "siglip2")
@@ -95,8 +96,8 @@ class FrozenEncoder(torch.nn.Module):
         n = x.shape[-1] // self.spec.patch
         patches = tokens[:, -n * n:]
         if self.is_clip:
-            # HF CLIP applies its final LayerNorm only to the pooled CLS token; apply it to
-            # the patch tokens too so both live on the same scale.
+            # HF CLIP applies its final LayerNorm only to the pooled CLS token. Apply it to
+            # the patch tokens too so both are on the same scale.
             patches = self.model.post_layernorm(patches)
         pooled = out.pooler_output
         return pooled.float(), patches.float().reshape(x.shape[0], n, n, -1)

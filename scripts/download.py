@@ -1,9 +1,9 @@
-"""Resumable, parallel download for large dataset files on an unreliable connection.
+"""Resumable parallel download for large dataset files over a bad connection.
 
     python scripts/download.py URL DEST [--sha256 HEX] [--workers 8] [--piece-mb 32]
 
-The file is split into pieces fetched with HTTP Range requests by several threads and
-written straight to disk; finished pieces are recorded in DEST.parts, so a dropped
+The file is split into pieces. Several threads fetch them with HTTP Range requests and
+write them straight to disk. Finished pieces are recorded in DEST.parts, so a dropped
 connection only retries the pieces in flight and a killed run resumes where it stopped.
 """
 import argparse

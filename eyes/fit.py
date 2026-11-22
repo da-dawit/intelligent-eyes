@@ -1,6 +1,6 @@
-"""Choosing the few scalars that are not derived: shrinkage lam, stopping threshold eps.
+"""Pick the few scalars that are not derived (lam and tau in R, and the stopping threshold eps).
 
-Both are chosen on held-out clips only (proposal Sec. 7: "10% held out for eps").
+All of them are chosen on held-out clips only. Proposal Sec. 7 says "10% held out for eps".
 """
 from __future__ import annotations
 
@@ -12,10 +12,10 @@ from .correlation import shrink
 
 
 def fused_nll(clips: list[Clip], model: Model, n_random: int = 2, seed: int = 0) -> float:
-    """Mean negative log-likelihood of the true species under eq. (1), averaged over two
-    observation sets per clip: glances + `n_random` random looks, and glances + every look.
+    """Mean NLL of the true species under eq. (1), averaged over two observation sets per clip.
 
-    The first is the regime the eyes work in; the second stresses the within-frame table A.
+    The sets are glances + `n_random` random looks, and glances + every look. The first is
+    the regime the eyes work in. The second stresses the within-frame table A.
     """
     rng = np.random.default_rng(seed)
     total = 0.0
@@ -41,9 +41,10 @@ def choose_shrinkage(clips: list[Clip], A: np.ndarray, rho: float, log_prior: np
 
 def choose_R(clips: list[Clip], A: np.ndarray, rho: float, log_prior: np.ndarray, sigma2: float,
              lambdas=(0.0, 0.2, 0.4, 0.6, 0.8), taus=(0.0, 0.1, 0.2, 0.4, 0.8, 1.6, 3.2), seed: int = 0):
-    """Pick (lam, tau) of R = T_rho (x) A_lam + tau 1_c 1_c^T by held-out NLL.
+    """Pick (lam, tau) of R = T_rho kron A_lam + tau 1_c 1_c^T by held-out NLL.
 
-    Returns (lam, tau, {"lam,tau": nll})."""
+    Returns (lam, tau, {"lam,tau": nll}).
+    """
     nll = {f"{lam},{tau}": fused_nll(clips, Model(shrink(A, lam), rho, log_prior, sigma2, tau=tau), seed=seed)
            for lam in lambdas for tau in taus}
     best = min(nll, key=nll.get)

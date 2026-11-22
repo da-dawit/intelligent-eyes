@@ -1,8 +1,8 @@
-"""The belief over species, updated with correlated votes (proposal eq. 1).
+"""Belief over species from correlated votes (proposal eq. 1).
 
-A vote is l_j(y) = log q(y | f_j) - log pi(y): how much more likely species y became
-after seeing observation j than it was before (pi = training class frequencies).
-Bayes' rule with correlated votes (derivations, Prop. 3.1):
+The vote of observation j is l_j(y) = log q(y | f_j) - log pi(y). It says how much more
+likely species y is after seeing j than before (pi = training class frequencies).
+With correlated votes, Bayes' rule gives (derivations, Prop. 3.1)
 
     p(y)  propto  pi(y) * exp( sum_{j in S} w_j l_j(y) ),     w = R_S^{-1} 1
 """
@@ -32,29 +32,29 @@ def votes_from_log_probs(log_q: np.ndarray, log_prior: np.ndarray) -> np.ndarray
 def scores(votes_S: np.ndarray, R_S: np.ndarray, log_prior: np.ndarray, ridge: float = 1e-6) -> np.ndarray:
     """Belief scores s(y) = log pi(y) + sum_j w_j l_j(y), with w = R_S^{-1} 1.
 
-    votes_S: (|S|, K) votes of the observations taken so far; R_S: (|S|, |S|).
+    votes_S is (|S|, K), the votes of the observations taken so far. R_S is (|S|, |S|).
     """
     w = evidence_weights(R_S, ridge)
     return log_prior + w @ votes_S
 
 
 def posterior(votes_S: np.ndarray, R_S: np.ndarray, log_prior: np.ndarray, ridge: float = 1e-6) -> np.ndarray:
-    """p = softmax(scores): eq. (1)."""
+    """Posterior p = softmax(scores) of eq. (1)."""
     return softmax(scores(votes_S, R_S, log_prior, ridge))
 
 
 def add_one_look_terms(R_SS: np.ndarray, R_SC: np.ndarray, ridge: float = 1e-6, R_CC_diag: np.ndarray | None = None):
-    """Block-inverse quantities for adding one candidate look (derivations, Prop. 4.1).
+    """Terms for adding one candidate look, from the block inverse (derivations, Prop. 4.1).
 
-    For every candidate j (a column of R_SC = R[S, candidates]):
-        a_j = R_SS^{-1} R_Sj                         (what S already says about j)
-        s_j = 1 - R_jS R_SS^{-1} R_Sj                (Schur complement: what is new)
-        c_j = (1 - R_jS R_SS^{-1} 1) / s_j           (converts j's innovation to evidence)
-    so that adding j changes the total evidence by c_j * (l_j - a_j^T l_S).
+    For each candidate j (a column of R_SC = R[S, candidates]):
+        a_j = R_SS^{-1} R_Sj                  what S already says about j
+        s_j = 1 - R_jS R_SS^{-1} R_Sj         Schur complement, the part of j that is new
+        c_j = (1 - R_jS R_SS^{-1} 1) / s_j    turns j's innovation into evidence
+    Adding j changes the total evidence by c_j * (l_j - a_j^T l_S).
 
-    Returns a (|S|, C), s (C,), c (C,). One linear solve covers all candidates.
-    R_CC_diag: each candidate's own variance R_jj (1 for a correlation matrix, the default;
-    1 + tau with a shared crop error).
+    Returns a (|S|, C), s (C,) and c (C,), all from one linear solve.
+    R_CC_diag is each candidate's own variance R_jj. The default 1 is for a correlation
+    matrix. With a shared crop error it is 1 + tau.
     """
     n = R_SS.shape[0]
     a = np.linalg.solve(R_SS + ridge * np.eye(n), R_SC)

@@ -1,26 +1,28 @@
-"""The best pair of looks: proposal metric 4 and the greedy guarantee (derivations Sec. 8).
+"""Best pair of looks, for proposal metric 4 and the greedy guarantee (derivations Sec. 8).
 
-Prop. 4.1 adds one look with a block inverse. Adding a *block* B of looks works the same
-way, with matrices where Prop. 4.1 has numbers:
+Prop. 4.1 adds one look with a block inverse. Adding a block B of looks works the same
+way, with matrices where Prop. 4.1 has numbers.
 
     a_B     = R_SS^{-1} R_SB              (|S|, |B|)  what S already says about B
-    Sig_B   = R_BB - R_BS a_B             (|B|, |B|)  Schur complement: what is new
+    Sig_B   = R_BB - R_BS a_B             (|B|, |B|)  Schur complement, the part of B that is new
     g_B     = Sig_B^{-1} (1 - a_B^T 1)    (|B|,)      turns B's innovations into evidence
     Delta_B = g_B^T (l_B - a_B^T l_S)     (K,)        change in the species scores
 
-For |B| = 1 this is g = c_j of Prop. 4.1. Before the looks are taken, eq. (2) predicts
-l_B ~ N(mu_B, sigma2 R_BB) (prediction errors repeat like the votes, as in Prop. 5.1), so
+For |B| = 1, g is c_j of Prop. 4.1. Before the looks are taken, eq. (2) predicts
+l_B ~ N(mu_B, sigma2 R_BB), since prediction errors repeat like the votes (as in Prop. 5.1).
+So
 
     Delta_B ~ N(m_B, v_B I),   m_B = g_B^T (mu_B - a_B^T l_S),   v_B = sigma2 g_B^T R_BB g_B
 
-and eq. (3) gives f(B), the information the pair is expected to give, before seeing it.
-For pairs, Sig_B is 2 x 2 and is inverted by hand, so all (9T choose 2) pairs of a clip
+and eq. (3) gives f(B), the information the pair is expected to give before seeing it.
+For pairs Sig_B is 2 x 2 and is inverted by hand, so all (9T choose 2) pairs of a clip
 are scored at once.
 
-Two things are compared for each test clip, both from the glance state:
-  * information: f(greedy pair) / max_B f(B)  -- metric 4, the guarantee says >= 3/4 under A4
-  * accuracy:    the oracle pair that puts the most belief on the true species, an upper
-                 bound for any policy that takes two looks ("the best pair" reference).
+For each test clip two things are compared, both from the glance state.
+  * information: f(greedy pair) / max_B f(B). This is metric 4, and the guarantee says it
+    is >= 3/4 under A4.
+  * accuracy: the oracle pair that puts the most belief on the true species. It is an upper
+    bound for any policy that takes two looks (the best-pair reference).
 """
 from __future__ import annotations
 
@@ -34,7 +36,7 @@ from .eig import eig_closed_form
 def all_pairs(clip: Clip, model: Model) -> dict:
     """Score every pair of looks of `clip` from the glance state.
 
-    Returns (P = number of pairs):
+    Returns a dict with (P = number of pairs)
         i, j     (P,)    observation indices of the two looks (frame * 10 + position)
         f        (P,)    expected information f(B), eq. (3) for the block
         delta    (P, K)  the actual score change if the pair were taken (exact, given R)
@@ -51,8 +53,8 @@ def all_pairs(clip: Clip, model: Model) -> dict:
     a = np.linalg.solve(R_SS + model.ridge * np.eye(len(S)), R_SC)   # (|S|, |C|)
     M = R_CC - R_SC.T @ a                     # Schur complement for every pair of candidates
     u = 1.0 - a.sum(axis=0)                   # (|C|,)
-    e = votes[C] - a.T @ votes[S]             # innovations, actual   (|C|, K)
-    e_bar = mu[C] - a.T @ votes[S]            # innovations, predicted
+    e = votes[C] - a.T @ votes[S]             # actual innovations (|C|, K)
+    e_bar = mu[C] - a.T @ votes[S]            # predicted innovations
 
     i, j = np.triu_indices(len(C), k=1)
     d_i, d_j, off = M[i, i] + model.ridge, M[j, j] + model.ridge, M[i, j]
@@ -72,7 +74,7 @@ def all_pairs(clip: Clip, model: Model) -> dict:
 def pair_report(clip: Clip, model: Model, eyes_looks: list[int]) -> dict:
     """Metric 4 and the best-pair reference for one clip.
 
-    eyes_looks: the two observation indices the (adaptive) controller actually took.
+    eyes_looks holds the two observation indices the (adaptive) controller actually took.
     """
     P = all_pairs(clip, model)
     S, C = glance_indices(clip.T), look_indices(clip.T)

@@ -1,10 +1,10 @@
-"""Linear classifiers on frozen features (logistic regression, L26-27) + temperature.
+"""Linear classifiers on frozen features (logistic regression, L26-27) plus a temperature.
 
-Two classifiers per encoder: one reads glances, one reads crops (crops are labelled with
-their clip's species even when the animal is elsewhere, so a calibrated crop classifier
-learns to fall back toward the prior on empty crops -- a vote near 0).
-Temperature scaling on held-out cameras makes assumption A3 (calibration) hold better
-on unseen cameras.
+Each encoder gets two classifiers, one for glances and one for crops. By default crops are
+labelled with their clip's species even when the animal is elsewhere, so a calibrated crop
+classifier learns to fall back toward the prior on empty crops. That gives a vote near 0.
+Temperature scaling on held-out cameras makes assumption A3 (calibration) hold better on
+unseen cameras.
 """
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ def train_probe(X: np.ndarray, y: np.ndarray, n_classes: int, epochs: int = 25, 
 
 
 def fit_temperature(logits: np.ndarray, y: np.ndarray) -> float:
-    """T minimising held-out negative log-likelihood of softmax(logits / T)."""
+    """Temperature T that minimises the held-out NLL of softmax(logits / T)."""
     def nll(logT):
         z = logits / np.exp(logT)
         z = z - z.max(axis=1, keepdims=True)

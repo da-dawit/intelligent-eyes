@@ -3,19 +3,20 @@
 Each clip has one species y (A1). An animal sits under one crop and may move between
 frames. Observation (f, k) sees a feature
 
-    x_fk = a_fk * onehot(y) + n_fk,     n ~ N(0, R) per species component, R = T_rho (x) A
+    x_fk = a_fk * onehot(y) + n_fk,     n ~ N(0, R) per species component, R = T_rho kron A
 
-where a_fk is how visible the animal is from position k (glance: small; the crop that
-holds the animal: full; half-overlapping neighbours: a quarter; others: 0).
+where a_fk is how visible the animal is from position k. It is small for the glance, full
+for the crop that holds the animal, a quarter for the half-overlapping neighbours and 0
+for the rest.
 
 The vote is the calibrated log-likelihood ratio of that feature on its own,
     l_fk(y) = log N(x_fk; a_fk e_y, I) + const = a_fk * x_fk(y) + const
             = a_fk^2 * onehot(y) + a_fk * n_fk      (centred across species)
-so an empty crop votes exactly 0, as a calibrated classifier would (A3).
+so an empty crop votes exactly 0, like a calibrated classifier would (A3).
 
-The look predictor knows roughly *where* the animal is (a noisy preview of a_fk) but
-not *what* it is, so it predicts mu_fk = a_hat_fk^2 * (p_f - 1/K): the belief after
-frame f's glance, made louder where the preview sees something.
+The look predictor roughly knows where the animal is (a noisy preview of a_fk) but not
+which species it is. So it predicts mu_fk = a_hat_fk^2 * (p_f - 1/K), the belief after
+frame f's glance scaled up where the preview sees something.
 """
 from __future__ import annotations
 

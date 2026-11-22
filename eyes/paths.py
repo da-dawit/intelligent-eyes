@@ -1,4 +1,4 @@
-"""Where data lives. Data stays outside the repo; set EYES_DATA (and EYES_RESULTS) to move it."""
+"""Where data lives. Data stays outside the repo. Set EYES_DATA (and EYES_RESULTS) to move it."""
 import os
 from pathlib import Path
 

@@ -1,4 +1,4 @@
-"""Build clips (bursts of 1-10 frames) and the frame table every later step indexes.
+"""Build clips (bursts of 1-10 frames) and the frame table that every later step indexes.
 
 frames.csv has one row per frame, in clip order:
     row, path, clip_id, split, camera, frame_idx, y_frame, y_clip
@@ -26,14 +26,14 @@ def _empty_label(root: Path, md: pd.DataFrame) -> int | None:
 
 def build_iwildcam(root: str | Path, splits=("train", "test"), max_frames: int = 10,
                    max_clips: dict | None = None, seed: int = 0) -> tuple[pd.DataFrame, dict]:
-    """WILDS iWildCam v2.0 -> frame table of clips.
+    """Frame table of clips from WILDS iWildCam v2.0.
 
-    A clip is one WILDS sequence (a motion-triggered burst) within one split, frames in
-    time order, at most `max_frames`. Assumption A1 (one species per clip): clips whose
-    frames name two different species are dropped, as are clips with no animal at all.
-    Frames labelled 'empty' inside an animal clip are kept -- the animal is out of frame
-    there, which is failure mode 3.
-    max_clips: optional {split: n} to subsample clips (seeded) for quick runs.
+    A clip is one WILDS sequence (a motion-triggered burst) within one split, with frames in
+    time order and at most `max_frames` of them. Assumption A1 is one species per clip, so
+    clips whose frames name two different species are dropped. Clips with no animal at all
+    are dropped too. Frames labelled 'empty' inside an animal clip are kept. There the animal
+    is out of frame, which is failure mode 3.
+    max_clips is an optional {split: n} to subsample clips (seeded) for quick runs.
     """
     root = Path(root)
     md = pd.read_csv(root / "metadata.csv")
@@ -82,7 +82,7 @@ def build_iwildcam(root: str | Path, splits=("train", "test"), max_frames: int =
 
 
 def build_ddr(root: str | Path, max_clips: dict | None = None, seed: int = 0) -> tuple[pd.DataFrame, dict]:
-    """DDR grading set -> one-frame clips. Grade 5 (ungradable) is dropped.
+    """Frame table of one-frame clips from the DDR grading set. Grade 5 (ungradable) is dropped.
 
     Expects root/<folder>/{train,valid,test}.txt with lines '<file> <grade>' and the
     images in root/<folder>/<split>/, where <folder> is DR_grading (the Hugging Face copy)
@@ -101,7 +101,7 @@ def build_ddr(root: str | Path, max_clips: dict | None = None, seed: int = 0) ->
     df = pd.DataFrame(rows, columns=["path", "clip_id", "split", "y"])
     frames = pd.DataFrame({
         "row": np.arange(len(df)), "path": df["path"], "clip_id": df["clip_id"], "split": df["split"],
-        "camera": np.arange(len(df)),          # no cameras: each photo is its own bootstrap unit
+        "camera": np.arange(len(df)),          # no cameras, so each photo is its own bootstrap unit
         "frame_idx": 0, "y_frame": df["y"], "y_clip": df["y"],
     })
     grades = frames.groupby(["split", "y_clip"]).size().unstack(0).fillna(0).astype(int)

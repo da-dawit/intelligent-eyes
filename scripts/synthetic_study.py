@@ -1,5 +1,5 @@
-"""Synthetic study: the controller on clips with a known R (3 seeds), and the diagnosis of
-failure mode 'wrong R' -- the singular within-frame table.
+"""Synthetic study: the controller on clips with a known R (3 seeds), and failure mode
+'wrong R' (the singular within-frame table A and how much shrinkage fixes it).
 
     python scripts/synthetic_study.py
 
@@ -58,7 +58,7 @@ def main():
         refs.append(dict(all9=evaluate(test, m, "all", 0, seed), eyes_noR=evaluate(test, naive, "eig", 2, seed),
                          all9_noR=evaluate(test, naive, "all", 0, seed)))
 
-    # ---- table
+    # summary.md
     S = {lam: np.array(v) for lam, v in sweep.items()}             # (seeds, 3 methods, acc/ece)
     lines = ["# Synthetic study (known R, 3 seeds x 1000 test clips)\n",
              f"Shrinkage lam chosen by held-out NLL per seed: {chosen}\n",
@@ -83,7 +83,7 @@ def main():
     (out_dir / "summary.md").write_text("\n".join(lines))
     print("\n".join(lines))
 
-    # ---- figure
+    # figure.png
     fig, ax = plt.subplots(1, 3, figsize=(12, 3.4))
     lams = np.linspace(0, 1, 41)
     W = np.array([evidence_weights(shrink(A, l), 1e-9) for l in lams])

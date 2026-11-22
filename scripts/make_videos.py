@@ -9,17 +9,17 @@
     python scripts/make_videos.py --gallery final_dinov2.pkl --gallery-clips ID,ID,...
 
 Every video replays the controller step by step with the fitted model, so each look and each belief
-shown is the one the method actually computes. Four kinds, each listed (in order) in a text file the
-page reads:
+shown is the one the method computes. There are five kinds. All but the teaser are listed in order in
+a text file that the page reads:
     compare_<clip>.mp4   as proposed | final method, side by side                 (videos.txt)
     teaser.mp4           the final method alone, larger
     baselines_<clip>.mp4 random | motion | attention | EIG looks on one clip      (baselines.txt)
     encoders_<clip>.mp4  the final method with each of the four encoders           (encoders.txt)
     gallery_<clip>.mp4   the final method with the stopping rule (0-4 looks)       (gallery.txt)
 
-Layout: nothing is written on the footage; a step tracker sits above it, a filmstrip below it (faded
-frames are not glanced yet, boxes mark where the looks went) and the belief over species under or
-beside it. The species rows are fixed for a whole video, so only the bars move. Needs ffmpeg.
+Nothing is written on the footage itself. A step tracker sits above it and a filmstrip below it (faded
+frames are not glanced yet, boxes mark where the looks went). The belief over species is under it or
+beside it. The species rows stay fixed for a whole video, so only the bars move. Needs ffmpeg.
 """
 import argparse
 import pickle
@@ -63,7 +63,7 @@ def font(size, face="regular"):
 
 
 def sci(name):
-    """Binomial style: capitalise the genus ('urocyon cinereoargenteus' -> 'Urocyon cinereoargenteus')."""
+    """Capitalise the genus, as in binomial names ('urocyon cinereoargenteus' -> 'Urocyon cinereoargenteus')."""
     return name[:1].upper() + name[1:]
 
 
@@ -75,11 +75,10 @@ def lerp(a, b, t):
     return tuple((1 - t) * x + t * y for x, y in zip(a, b))
 
 
-# ------------------------------------------------------------------ what the method did
 def trajectory(clip, model, rule, budget=2, eps=0.0, seed=0):
     """Beliefs after the glance and after each look, as the controller computes them.
 
-    With eps > 0 the controller may stop before the budget (the stopping rule); the looks it takes
+    With eps > 0 the controller may stop before the budget (the stopping rule). The looks it takes
     are the first ones it would take without stopping, so the beliefs come from shorter budgets.
     Random looks use the same seed in every call, so they are the same looks too."""
     final = run(clip, model, rule, budget=budget, eps=eps, rng=np.random.default_rng(seed))
@@ -91,8 +90,9 @@ def trajectory(clip, model, rule, budget=2, eps=0.0, seed=0):
 
 
 def species_rows(t, label, n=4):
-    """The species listed for a panel: the true one, the predicted one and the most probable ones
-    at any step, in the order of the glance's belief."""
+    """The species listed for a panel, in the order of the glance's belief.
+
+    These are the true one, the predicted one and the most probable ones at any step."""
     best = np.max(np.stack(t["p"]), axis=0)
     rows = list(dict.fromkeys([label, t["pred"]] + [int(k) for k in np.argsort(-best)]))[:n]
     return sorted(rows, key=lambda k: -t["p"][0][k])
@@ -132,13 +132,12 @@ class State:
     verdict: bool | None = None        # correct or not, once the prediction is shown
 
 
-# ------------------------------------------------------------------ timing
 def glance_hold(T):
     return int(np.clip(round(72 / T), 7, 20))         # video frames per clip frame during the glance
 
 
 def poster_index(T, n_looks=2):
-    """A representative video frame: zoomed in on look 1, or the prediction if there is no look."""
+    """Index of the video frame used as the poster: look 1 zoomed in, or the prediction if there are no looks."""
     return glance_hold(T) * T + (40 + 20 + 14 + 24 if n_looks else 52)
 
 
@@ -150,7 +149,7 @@ def look_status(p, j, T):
 
 
 def timeline(panels, T):
-    """One State per panel for every video frame; the panels move through the steps together."""
+    """One State per panel for every video frame. The panels move through the steps together."""
     n = len(panels[0].t["looks"])
     assert all(len(p.t["looks"]) == n for p in panels), "panels side by side take the same number of looks"
     for f in range(T):                                                   # glance at every frame
@@ -195,9 +194,8 @@ def timeline(panels, T):
                      status=f"Prediction: {sci(p.names[p.t['pred']])}") for p, f in zip(panels, last)]
 
 
-# ------------------------------------------------------------------ drawing
 def footage(p, st, size, s=1.0):
-    """The frame (or the part of it being looked at) fitted into `size`; only the look box on top."""
+    """The frame, or the part of it being looked at, fitted into `size`. Only the look box is drawn on top."""
     im = p.frames[st.f]
     W, H = im.size
     sc = min(size[0] / W, size[1] / H)
@@ -225,7 +223,7 @@ def footage(p, st, size, s=1.0):
 
 
 def filmstrip(canvas, d, p, st, x, y, w, tw_max):
-    """The clip's frames; faded = not glanced yet; outlined = on screen; boxes = looks taken."""
+    """The clip's frames. Faded frames are not glanced yet, the outlined one is on screen, boxes are looks taken."""
     T = len(p.frames)
     W, H = p.frames[0].size
     gap = 5
@@ -248,7 +246,9 @@ def filmstrip(canvas, d, p, st, x, y, w, tw_max):
 
 
 def tracker(d, step, names, cx, cy, size=21, max_w=None):
-    """Glance -- Look 1 -- ... -- Prediction, with the current step dark; shrinks to fit max_w."""
+    """The steps (Glance, Look 1, ..., Prediction) as dots joined by lines, with the current step dark.
+
+    The text shrinks until it fits in max_w."""
     while True:
         fnt, r, link, pad = font(size, "medium"), size * 0.29, size * 1.6, size * 0.43
         widths = [fnt.getlength(s) for s in names]
@@ -268,7 +268,7 @@ def tracker(d, step, names, cx, cy, size=21, max_w=None):
 
 
 def mark(d, ok, x, cy, s=14, width=3):
-    """A drawn check mark or cross (the font has neither), coloured for correct / wrong."""
+    """A drawn check mark or cross (the font has neither), green for correct and red for wrong."""
     if ok:
         d.line([(x, cy), (x + s * 0.38, cy + s * 0.4), (x + s, cy - s * 0.45)], fill=GOOD, width=width, joint="curve")
     else:
@@ -278,14 +278,15 @@ def mark(d, ok, x, cy, s=14, width=3):
 
 
 def status_line(d, st, x, cy, size=21, right=None, room=None):
-    """The panel's status; after the prediction, a coloured mark and 'correct' / 'wrong'.
-    right: right-align at this x; room: the width available (the text is shortened to fit)."""
+    """The panel's status line. After the prediction it ends with a coloured mark and 'correct' or 'wrong'.
+
+    right is the x to right-align at, and room is the width available (the text is shortened to fit)."""
     fnt, bold = font(size), font(size, "medium")
     word = None if st.verdict is None else ("correct" if st.verdict else "wrong")
     tail = 0 if word is None else 12 + size + bold.getlength(word)
     text = st.status
-    if room is not None:                                                 # too long: drop trailing parts, the prefix,
-        while ", " in text and fnt.getlength(text) + tail > room:        # then the predicted name
+    if room is not None:                                                 # if too long, drop trailing parts, then the
+        while ", " in text and fnt.getlength(text) + tail > room:        # prefix, then the predicted name
             text = text.rsplit(", ", 1)[0]
         if fnt.getlength(text) + tail > room:
             text = text.replace("Prediction: ", "")
@@ -303,7 +304,7 @@ def status_line(d, st, x, cy, size=21, right=None, room=None):
 
 
 def beliefs(d, p, st, x, y, w, row_h, stacked=False, s=1.0):
-    """Belief over the panel's species rows: name, bar, value. 'TRUE' marks the true species."""
+    """Belief over the panel's species rows, each drawn as name, bar and value. A TRUE tag marks the true species."""
     nf, vf, tf = font(21 * s, "italic"), font(20 * s), font(14 * s, "bold")
     pill = 12 * s + tf.getlength("TRUE")
     names = [sci(p.names[k]) for k in p.rows]
@@ -337,8 +338,9 @@ def swatch_title(d, p, x, cy, size=24):
 
 
 def cell(canvas, d, p, st, x, y, w, foot_h, s=1.0, strip=True, row_h=36, title_w=None):
-    """One panel: name and status, footage, filmstrip, beliefs. Returns the height used.
-    title_w: the widest name among the panels, so every panel shortens its status the same way."""
+    """One panel with name and status, footage, filmstrip and beliefs. Returns the height used.
+
+    title_w is the widest name among the panels, so every panel shortens its status the same way."""
     y0 = y
     name_w = swatch_title(d, p, x, y + 14 * s, size=24 * s)
     status_line(d, st, 0, y + 14 * s, size=20 * s, right=x + w, room=w - (title_w or name_w) - 24 * s)
@@ -352,7 +354,6 @@ def cell(canvas, d, p, st, x, y, w, foot_h, s=1.0, strip=True, row_h=36, title_w
     return y - y0
 
 
-# ------------------------------------------------------------------ the layouts
 CMP_SIZE, GRID_SIZE, TSR_SIZE, CARD_SIZE = (1360, 720), (1280, 1232), (1280, 640), (960, 820)
 
 
@@ -371,7 +372,7 @@ def grid_frame(panels, states):
     canvas = Image.new("RGB", GRID_SIZE, BG)
     d = ImageDraw.Draw(canvas)
     tracker(d, states[0].step, panels[0].steps, GRID_SIZE[0] / 2, 36)
-    w, fh, gx, pitch = 604, 340, 24, 584                                 # pitch: one row of panels
+    w, fh, gx, pitch = 604, 340, 24, 584                                 # pitch is the height of one row of panels
     title_w = max(24 * 0.6 + 10 + font(24, "bold").getlength(p.name) for p in panels)
     for i, (p, st) in enumerate(zip(panels, states)):
         r, c = divmod(i, 2)
@@ -399,7 +400,7 @@ def teaser_frame(p, st, encoder):
 
 
 def card_frame(p, st):
-    """A gallery card, made to be shown at half the page width: large type, footage, three species."""
+    """A gallery card with the footage and three species. It is shown at half the page width, so the type is large."""
     canvas = Image.new("RGB", CARD_SIZE, BG)
     d = ImageDraw.Draw(canvas)
     s, x, w = 1.45, 24, CARD_SIZE[0] - 48
@@ -411,7 +412,6 @@ def card_frame(p, st):
     return canvas
 
 
-# ------------------------------------------------------------------ output
 def write_mp4(frames_iter, size, out, poster_at, crf=20):
     W, H = size
     cmd = ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS),
@@ -457,7 +457,7 @@ def ids(arg):
 
 
 def make_compare(args, data, out):
-    """As proposed | final on clips where the final eyes are right and the proposed ones wrong; teaser."""
+    """As proposed | final on clips where the final eyes are right and the proposed ones wrong, then the teaser."""
     A, B = pickle.load(open(args.proposed, "rb")), pickle.load(open(args.final, "rb"))
     names_a, names_b = data.names(A), data.names(B)
     clips_a = {c.clip_id: c for c in A["clips"]}
@@ -481,7 +481,7 @@ def make_compare(args, data, out):
         write_mp4((compare_frame(panels, st) for st in timeline(panels, len(frames))), CMP_SIZE,
                   out / f"compare_{cid}.mp4", poster_index(len(frames)))
         made.append(f"compare_{cid}.mp4\t{sci(names_b[cb.label])}\t{len(frames)}")
-    (out / "videos.txt").write_text("\n".join(made) + "\n")          # file, species, frames: the page shows these
+    (out / "videos.txt").write_text("\n".join(made) + "\n")          # file, species, frames (read by the page)
 
     def teaser_frames():                                             # the final method alone, joined by crossfades
         last = None

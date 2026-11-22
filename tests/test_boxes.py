@@ -39,7 +39,7 @@ def test_mixture_vote_matches_bayes_rule_on_a_toy_model():
 
 
 def test_crop_labels_from_a_box():
-    """A small box inside the top-left quarter: crop 1 holds it; crops it does not touch are empty."""
+    """A small box inside the top-left quarter. Crop 1 holds it and the crops it does not touch are empty."""
     frames = pd.DataFrame({"path": ["train/a.jpg", "train/b.jpg", "train/c.jpg"], "y_frame": [3, 0, 3]})
     det = {"a.jpg": [(0.9, 0.05, 0.05, 0.1, 0.1)],         # conf, x, y, w, h
            "c.jpg": [(0.1, 0.05, 0.05, 0.1, 0.1)]}         # too unsure: frame skipped

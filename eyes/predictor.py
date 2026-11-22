@@ -1,17 +1,17 @@
 """Predict a look before paying for it (proposal eq. 2, derivations Sec. 5).
 
-Prior prediction (ridge regression, least squares):
+The prior prediction is a ridge regression (least squares)
     mu_j = W [u_bar_fk ; g_f] + b
 where u_bar_fk is the mean of the glance's patch tokens inside crop k (a cheap
 low-resolution preview) and g_f is frame f's glance feature.
 
-After real looks L have been taken, the remaining predictions are corrected by
-conditioning a Gaussian (Prop. 5.1):
+Once real looks L are taken, the other predictions are corrected by Gaussian
+conditioning (Prop. 5.1)
     mu_{j|L}     = mu_j + R_jL R_LL^{-1} (l_L - mu_L)
     sigma2_{j|L} = sigma2 * (1 - R_jL R_LL^{-1} R_Lj)
 
-Only the *looks* are conditioned on, not the glances: the predictor already takes
-the glance as input, so conditioning on it again would count it twice.
+Only the looks are conditioned on. The predictor already takes the glance as input, so
+conditioning on the glances again would count them twice.
 """
 from __future__ import annotations
 
@@ -51,9 +51,9 @@ def fit_ridge(X: np.ndarray, Y: np.ndarray, groups: np.ndarray,
               seed: int = 0) -> RidgePredictor:
     """Fit W = (Z^T Z + lam N I)^{-1} Z^T Y on standardised inputs Z.
 
-    lam is chosen by grouped K-fold cross-validation (groups = cameras, so the error
-    is measured on unseen cameras); sigma2 is the cross-validated error at that lam.
-    One eigendecomposition of Z^T Z per fold serves every lam.
+    lam is chosen by grouped K-fold cross-validation. The groups are cameras, so the error
+    is measured on unseen cameras. sigma2 is the cross-validated error at that lam.
+    One eigendecomposition of Z^T Z per fold covers every lam.
     """
     X = X.astype(np.float64)
     Y = Y.astype(np.float64)
@@ -122,10 +122,10 @@ def condition_on_looks(mu_C: np.ndarray, sigma2: float, R_LC: np.ndarray, R_LL: 
                        votes_L: np.ndarray, mu_L: np.ndarray, ridge: float = 1e-6):
     """Gaussian conditioning of candidate predictions on the looks taken (Prop. 5.1).
 
-    mu_C   : (C, K) prior predictions for the candidates
-    R_LC   : (|L|, C) correlations between taken looks and candidates
-    R_LL   : (|L|, |L|)
-    votes_L, mu_L : (|L|, K) actual votes and prior predictions of the taken looks
+    mu_C           (C, K) prior predictions for the candidates
+    R_LC           (|L|, C) correlations between taken looks and candidates
+    R_LL           (|L|, |L|)
+    votes_L, mu_L  (|L|, K) actual votes and prior predictions of the taken looks
     Returns mu_cond (C, K) and var_cond (C,).
     """
     if R_LL.shape[0] == 0:

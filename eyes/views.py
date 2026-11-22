@@ -1,8 +1,8 @@
-"""Turn a frame into its 10 views: one glance and nine 2x crops.
+"""Turn a frame into its 10 views, one glance and nine 2x crops.
 
-The frame is resized once to 448 x 448 (squashed, not cropped, so nothing at the edges
-is lost; every view shares the same aspect distortion). The glance is that image
-downsampled to 224; each crop is an exact 224 x 224 slice of it.
+The frame is resized once to 448 x 448. It is squashed rather than cropped, so nothing at
+the edges is lost and every view has the same aspect distortion. The glance is that image
+downsampled to 224, and each crop is an exact 224 x 224 slice of it.
 """
 from __future__ import annotations
 
@@ -32,29 +32,27 @@ def load_frame(path: str) -> tuple[np.ndarray, np.ndarray]:
 
 
 def make_views(frames: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    """frames: (B, 3, 448, 448) floats in [0, 1].
-
-    Returns glances (B, 3, 224, 224) and crops (B, 9, 3, 224, 224).
-    """
+    """Glances (B, 3, 224, 224) and crops (B, 9, 3, 224, 224) from frames (B, 3, 448, 448) in [0, 1]."""
     glances = F.interpolate(frames, size=(VIEW, VIEW), mode="bilinear", antialias=True, align_corners=False)
     crops = torch.stack([frames[:, :, rs, cs] for rs, cs in pixel_slices()], dim=1)
     return glances, crops
 
 
 def crop_previews(patches: torch.Tensor, masks: torch.Tensor) -> torch.Tensor:
-    """Mean glance patch token inside each crop: u_bar (B, 9, D).
+    """u_bar (B, 9, D), the mean glance patch token inside each crop.
 
-    patches: (B, n, n, D) glance patch tokens;  masks: (9, n, n) bool (geometry.token_masks).
+    patches are the (B, n, n, D) glance patch tokens and masks the (9, n, n) bool masks
+    from geometry.token_masks.
     """
     m = masks.to(patches.dtype)
     return torch.einsum("bijd,kij->bkd", patches, m) / m.sum(dim=(1, 2))[None, :, None]
 
 
 def motion_scores(thumbs: np.ndarray) -> np.ndarray:
-    """B4 baseline: mean absolute change of each crop region from the previous frame.
+    """Baseline B4 scores, the mean absolute change of each crop region since the previous frame.
 
-    thumbs: (T, 48, 48) uint8 thumbnails of one clip in time order -> (T, 9) scores.
-    The first frame is compared with the second (a one-frame clip scores 0).
+    thumbs (T, 48, 48) uint8 thumbnails of one clip in time order -> (T, 9) scores.
+    The first frame is compared with the second, and a one-frame clip scores 0.
     """
     T = len(thumbs)
     x = thumbs.astype(np.float32) / 255.0

@@ -53,7 +53,7 @@ def test_eyes_beat_random_looks_and_recover_most_of_all9(world):
 
 
 def test_ignoring_R_is_overconfident(world):
-    """Failure mode 2 in miniature: treating repeated evidence as new inflates confidence."""
+    """Failure mode 2 on a small scale. Treating repeated evidence as new makes the belief overconfident."""
     _, ece_R, _ = _evaluate(world["test"], world["model"], "all")
     _, ece_naive, _ = _evaluate(world["test"], world["naive"], "all")
     assert ece_naive > ece_R + 0.05
@@ -77,7 +77,8 @@ def test_first_step_record(world):
 
 
 def test_mixture_eig_reduces_to_one_branch():
-    """eig_mix with P(animal) = 1 is the animal branch's eq. (3); with 0, the background branch's."""
+    """eig_mix with P(animal) = 1 is eq. (3) for the animal branch.
+    With P(animal) = 0 it is eq. (3) for the background branch."""
     from eyes.controller import eig_mixture
     from eyes.eig import eig_closed_form
     rng = np.random.default_rng(0)

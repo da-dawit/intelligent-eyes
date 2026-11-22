@@ -1,19 +1,23 @@
-"""Step 2: encode every frame once -- glance, 9 crops, crop previews -- and cache it.
+"""Step 2: encode every frame once (glance, 9 crops, crop previews) and cache it.
 
     python scripts/cache_features.py --frames $EYES_DATA/processed/iwildcam/frames.csv \
         --images $EYES_DATA/raw/iwildcam_v2.0 --encoders dinov2 clip --hires \
         --out-root $EYES_DATA/features/iwildcam
 
 Each frame is decoded once and fed to every encoder listed. For encoder E it writes
-<out-root>/E/chunk_00000.npz, chunk_00001.npz, ... each holding `chunk` consecutive rows
-of frames.csv. Per frame: g (D) glance feature, crops (9, D) crop features, ubar (9, D)
-crop previews from the glance's patch tokens, thumb (48, 48) grayscale thumbnail, ok,
-attn (9,) share of the glance's CLS attention inside each crop (B3; not for SigLIP 2).
-With --hires, also <out-root>/E_hr/: g of the whole 448 x 448 frame in one pass at 2x
-resolution (baseline B1). Stored as float16. Finished chunks are skipped, so an
-interrupted run resumes where it stopped.
+<out-root>/E/chunk_00000.npz, chunk_00001.npz, ..., each holding `chunk` consecutive rows
+of frames.csv. Per frame:
+  g (D)           glance feature
+  crops (9, D)    crop features
+  ubar (9, D)     crop previews from the glance's patch tokens
+  thumb (48, 48)  grayscale thumbnail
+  ok              False if the image could not be read
+  attn (9,)       share of the glance's CLS attention inside each crop (B3, not for SigLIP 2)
+With --hires it also writes <out-root>/E_hr/, with g of the whole 448 x 448 frame in one
+pass at 2x resolution (baseline B1). Features are stored as float16. Finished chunks are
+skipped, so an interrupted run resumes where it stopped.
 
-To keep a large GPU busy, outputs stay on the GPU until a chunk is complete; then one
+Outputs stay on the GPU until a chunk is complete, which keeps a large GPU busy. Then one
 copy moves the chunk to the CPU and a background thread writes it.
 """
 import argparse
@@ -142,7 +146,7 @@ def main():
             print(f"chunk {c + 1}/{n_chunks}: {n_done} frames in {dt:.0f}s ({n_done / dt:.1f} frames/s, "
                   f"{len(encs)} encoder(s){' + hires' if args.hires else ''})", flush=True)
     for p in pending:
-        p.result()                         # surface any write error
+        p.result()                         # re-raise any write error
     writer.shutdown()
 
 

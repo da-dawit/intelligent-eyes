@@ -1,7 +1,7 @@
 [project]
 name = "intelligent-eyes"
 version = "0.1.0"
-description = "Teaching frozen ViT encoders where (and when) to look in video, by expected information gain."
+description = "Teaching frozen ViT encoders where and when to look in video, by expected information gain."
 requires-python = ">=3.11"
 dependencies = [
     "numpy", "scipy", "scikit-learn", "pandas", "pillow", "matplotlib", "tqdm",

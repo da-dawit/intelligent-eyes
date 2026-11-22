@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Encode and evaluate on a rented GPU, keeping the GPU busy (run from the repo root):
-#   1. per dataset, ONE pass over the frames: each frame is decoded once and fed to all
+# Encode and evaluate on a rented GPU and keep the GPU busy. Run from the repo root.
+#   1. one pass over the frames per dataset. Each frame is decoded once and fed to all
 #      encoders, plus the 2x high-res pass (baseline B1)
-#   2. as soon as a dataset is encoded, its evaluations start on the CPU (one process per
+#   2. once a dataset is encoded, its evaluations start on the CPU (one process per
 #      encoder and seed) while the GPU moves on to the next dataset
 #   3. Table I per dataset
 # Expects $EYES_DATA/raw/{iwildcam_v2.0,ddr}, $EYES_DATA/processed/<dataset>/frames.csv and
-# the encoder weights in the Hugging Face cache (DINOv3 is gated: copy its weights in, so
-# the rented machine needs no access token). GPU use is logged to $EYES_DATA/logs/gpu.log.
+# the encoder weights in the Hugging Face cache. DINOv3 is gated, so copy its weights in and
+# the rented machine needs no access token. GPU use is logged to $EYES_DATA/logs/gpu.log.
 set -uo pipefail
 export EYES_DATA=${EYES_DATA:-/workspace/data} PYTHONPATH=$(pwd) HF_HUB_OFFLINE=1
 PY=${PY:-python}
@@ -25,7 +25,7 @@ smi=$!
 evals=()
 for ds in $DATASETS; do
     [ "$ds" = iwildcam ] && img="$D/raw/iwildcam_v2.0" || img="$D/raw/ddr"
-    if [ -n "${WAIT_FOR:-}" ]; then        # e.g. WAIT_FOR="iwildcam:/workspace/extract.done"
+    if [ -n "${WAIT_FOR:-}" ]; then        # for example WAIT_FOR="iwildcam:/workspace/extract.done"
         for w in $WAIT_FOR; do
             [ "${w%%:*}" = "$ds" ] && until [ -e "${w#*:}" ]; do sleep 15; done
         done

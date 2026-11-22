@@ -1,4 +1,4 @@
-"""Statistics used in the evaluation (derivations, Sec. 10; proposal Table I)."""
+"""Statistics used in the evaluation (derivations Sec. 10, proposal Table I)."""
 from __future__ import annotations
 
 import numpy as np
@@ -43,8 +43,8 @@ def confident_wrong_rate(probs: np.ndarray, label: np.ndarray, threshold: float 
 def mcnemar(correct_a: np.ndarray, correct_b: np.ndarray) -> dict:
     """Exact paired McNemar test on the same clips.
 
-    b = clips right only under A, c = right only under B; two-sided binomial test of
-    b against Bin(b + c, 1/2).
+    b counts clips right only under A and c clips right only under B. The test is a
+    two-sided binomial test of b against Bin(b + c, 1/2).
     """
     b = int(np.sum(correct_a & ~correct_b))
     c = int(np.sum(~correct_a & correct_b))
@@ -54,10 +54,10 @@ def mcnemar(correct_a: np.ndarray, correct_b: np.ndarray) -> dict:
 
 def camera_bootstrap(values: np.ndarray, cameras: np.ndarray, n_boot: int = 10_000,
                      seed: int = 0, level: float = 0.95) -> tuple[float, float, float]:
-    """Mean of per-clip `values` with a bootstrap interval that resamples *cameras*.
+    """Mean of per-clip `values` with a bootstrap interval that resamples cameras.
 
-    Clips from one camera are correlated, so cameras (not clips) are the resampled
-    unit. Returns (mean, low, high).
+    Clips from one camera are correlated, so the resampled unit is the camera instead of
+    the clip. Returns (mean, low, high).
     """
     rng = np.random.default_rng(seed)
     cams, inv = np.unique(cameras, return_inverse=True)
